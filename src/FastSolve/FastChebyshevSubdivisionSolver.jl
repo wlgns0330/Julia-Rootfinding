@@ -558,8 +558,8 @@ function fast_boundingIntervalLinearSystem(Ms, errors, finalStep)
             width = abs.(Ainv)*err'
             a1 = center-width
             b1 = center + width
-            a = mapslices(x->maximum(x),hcat(a0,a1),dims = 2)
-            b = mapslices(x->minimum(x),hcat(b0,b1),dims = 2)
+            a = max.(a0, a1)
+            b = min.(b0, b1)
         else
             a = a0
             b = b0
@@ -668,7 +668,8 @@ function fast_zoomInOnIntervalIter(Ms, errors, trackedInterval, exact)
     end
     #Transform the chebyshev polynomials
     fast_addTransform(trackedInterval,interval)
-    Ms, errors = fast_transformChebToInterval(Ms, fast_getLastTransform(trackedInterval)[:,1], fast_getLastTransform(trackedInterval)[:,2], errors, exact)
+    lastTransform = fast_getLastTransform(trackedInterval)
+    Ms, errors = fast_transformChebToInterval(Ms, lastTransform[:,1], lastTransform[:,2], errors, exact)
     #We should stop in the final step once the interval has become a point
     if trackedInterval.finalStep && fast_isPoint(trackedInterval)
         should_stop = true
