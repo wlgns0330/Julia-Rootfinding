@@ -450,8 +450,8 @@ function fast_transformChebToInterval(Ms, alphas, betas, errors, exact)
         The new errors associated with the transformed coefficient matrices
     """
     #Transform the chebyshev polynomials
-    newMs = []
-    newErrors = []
+    newMs = Vector{eltype(Ms)}()
+    newErrors = Vector{Float64}()
     for (M,e) in zip(Ms, errors)
         newM, newE = fast_transformCheb(M, alphas, betas, e, exact)
         push!(newMs,newM)
@@ -805,20 +805,21 @@ function fast_getSubdivisionIntervals(Ms,errors,trackedInterval,exact,level;oneD
         subdivisionDims = fast_getSubdivisionDims(Ms,trackedInterval,level)
     end
     dimSet = sort(subdivisionDims[1])
-    allMs = []
-    allErrors = []
+    AT = eltype(Ms) # Concrete polynomial array type (e.g. Array{Float64,N}); keep containers typed.
+    allMs = Vector{Vector{AT}}()
+    allErrors = Vector{Vector{Float64}}()
     idx = 0
     dim = length(Ms)
     for (M,error,order_num) in zip(Ms, errors, collect(1:dim))
         order = subdivisionDims[order_num]
         idx += 1
         #Iterate through the dimensions, highest degree first.
-        currMs, currErrs = [M],[error]
+        currMs, currErrs = AT[M], Float64[error]
         for thisDim in order
             newMidpoint = trackedInterval.nextTransformPoints[thisDim]
             alpha, beta = (newMidpoint+1)/2, (newMidpoint-1)/2
-            tempMs = []
-            tempErrs = []
+            tempMs = AT[]
+            tempErrs = Float64[]
             for (T,E) in zip(currMs, currErrs)
                 #Transform the polys
                 P1, P2 = fast_TransformChebInPlaceND(T, thisDim, alpha, beta, thisDim), fast_TransformChebInPlaceND(T, thisDim, -beta, alpha, exact)
@@ -837,12 +838,12 @@ function fast_getSubdivisionIntervals(Ms,errors,trackedInterval,exact,level;oneD
         else
             #Order the polynomials so they match the intervals in subdivideInterval
             invOrder = fast_getInverseOrder(order)
-            push!(allMs,[currMs[i] for i in invOrder])
-            push!(allErrors,([currErrs[i] for i in invOrder]))
+            push!(allMs,AT[currMs[i] for i in invOrder])
+            push!(allErrors,Float64[currErrs[i] for i in invOrder])
         end
     end
-    allMs = [[allMs[i][j] for i in eachindex(allMs)] for j in eachindex(allMs[1])]
-    allErrors = [[allErrors[i][j] for i in eachindex(allErrors)] for j in eachindex(allErrors[1])]
+    allMs = [AT[allMs[i][j] for i in eachindex(allMs)] for j in eachindex(allMs[1])]
+    allErrors = [Float64[allErrors[i][j] for i in eachindex(allErrors)] for j in eachindex(allErrors[1])]
     #Get the intervals
     allIntervals = [trackedInterval]
     

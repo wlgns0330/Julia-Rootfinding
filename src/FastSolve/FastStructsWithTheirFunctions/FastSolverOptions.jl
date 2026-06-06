@@ -18,14 +18,15 @@ mutable struct FastSolverOptions
     level : int
         Depth of subdivision for the given interval.
     """
-    verbose # = false (by default)
-    exact # = false (by default)
-    constant_check # = true (by default)
-    low_dim_quadratic_check # = true (by default)
-    all_dim_quadratic_check # = true (by default)
-    maxZoomCount # = 25 (by default)
-    level # = 0 (by default)
-    useFinalStep # = true (by default)
+    verbose::Bool                  # = false (by default)
+    exact::Bool                    # = false (by default)
+    constant_check::Bool           # = true (by default)
+    low_dim_quadratic_check::Bool  # = true (by default)
+    all_dim_quadratic_check::Bool  # = true (by default)
+    maxZoomCount::Int              # = 25 (by default)
+    level::Int                     # = 0 (by default)
+    useFinalStep::Bool             # = true (by default)
+    
     function FastSolverOptions(verbose=false,exact=false,constant_check=true,low_dim_quadratic_check=true,all_dim_quadratic_check=true,maxZoomCount=25,level=0,useFinalStep=true)
         #Init all the Options to default value
         new(verbose,exact,constant_check,low_dim_quadratic_check,all_dim_quadratic_check,maxZoomCount,level,useFinalStep)
