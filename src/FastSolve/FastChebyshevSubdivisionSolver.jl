@@ -228,12 +228,16 @@ function fast_transformChebInPlace1D1D(coeffs,alpha,beta)
     return transformedCoeffs[1:maxRow]
 end
 
-function fast_transformChebInPlace1D(coeffs,alpha,beta)
+function fast_transformChebInPlace1D(coeffs,alpha,beta,workdim=ndims(coeffs))
     """Applies the transformation alpha*x + beta to one dimension of a Chebyshev approximation.
 
     Recursively finds each column of the transformation matrix C from the previous two columns
     and then performs entrywise matrix multiplication for each entry of the column, thus enabling
     the transformation to occur while only retaining three columns of C in memory at a time.
+
+    The contraction is accumulated in place into a preallocated output tensor, operating directly
+    on the slices along dimension `workdim` (defaults to the last dimension). This avoids
+    materializing the slices and the per-column temporary arrays.
 
     Parameters
     ----------
@@ -243,18 +247,32 @@ function fast_transformChebInPlace1D(coeffs,alpha,beta)
         The scaler of the transformation
     beta : double
         The shifting of the transformation
+    workdim : int
+        The (Julia) dimension of coeffs to transform. Defaults to the last dimension.
 
     Returns
     -------
     transformedCoeffs : array
         The new coefficient array following the transformation
     """
-    coeffs_shape = size(coeffs)
-    if length(coeffs_shape) == 1
+    N = ndims(coeffs)
+    if N == 1
         return fast_transformChebInPlace1D1D(coeffs,alpha,beta)
     end
-    last_dim_length = coeffs_shape[end]
-    transformedCoeffs = zeros(coeffs_shape)
+    last_dim_length = size(coeffs, workdim)
+    # Collapse the dimensions before/after workdim so coeffs is viewed as a fixed 3D array
+    # (before, workdim, after). This is type stable for any N and any target axis, and reshape
+    # shares memory (no copy), so the contraction accumulates in place with no permutedims.
+    before = 1
+    for k in 1:workdim-1
+        before *= size(coeffs, k)
+    end
+    after = 1
+    for k in workdim+1:N
+        after *= size(coeffs, k)
+    end
+    in3 = reshape(coeffs, before, last_dim_length, after)
+    out3 = zeros(before, last_dim_length, after)
     # Initialize three arrays to represent subsequent columns of the transformation matrix.
     arr1 = zeros(last_dim_length)
     arr2 = zeros(last_dim_length)
@@ -263,53 +281,42 @@ function fast_transformChebInPlace1D(coeffs,alpha,beta)
     #The first column of the transformation matrix C. Since T_0(alpha*x + beta) = T_0(x) = 1 has 1 in the top entry and 0's elsewhere.
     arr1[1] = 1
 
-    # Get the correct number of colons for indexing transformedCoeffs
-    # idxs = []
-    dims = length(coeffs_shape)
-    # for i in 1:dims-1
-    #     push!(idxs,:)
-    # end
-
-    # oldSlices = mapslices(x->[x],coeffs,dims = 1:dims-1)
-    oldSlices = collect(eachslice(coeffs,dims=dims))
-    # newSlices = mapslices(x->[x],transformedCoeffs,dims = 1:dims-1)
-    newSlices = collect(Array.(eachslice(transformedCoeffs,dims=dims)))
-    newSlices[1] = oldSlices[1] # arr1[0] * coeffs[0] (matrix multiplication step)
+    # The workdim slices are accumulated into directly (no per-column temporary arrays).
+    @views out3[:,1,:] .= in3[:,1,:] # arr1[0] * coeffs[0]
     #The second column of C. Note that T_1(alpha*x + beta) = alpha*T_1(x) + beta*T_0(x).
     arr2[1] = beta
     arr2[2] = alpha
-    newSlices[1] += beta * oldSlices[2] # arr2[0] * coeffs[1] (matrix muliplication)
-    newSlices[2] += alpha * oldSlices[2] # arr2[1] * coeffs[1] (matrix multiplication)
+    @views out3[:,1,:] .+= beta .* in3[:,2,:] # arr2[0] * coeffs[1]
+    @views out3[:,2,:] .+= alpha .* in3[:,2,:] # arr2[1] * coeffs[1]
     maxRow = 2
     for col in 2:last_dim_length-1 # For each column, calculate each entry and do matrix mult
-        thisCoeff = oldSlices[col+1] # the row of coeffs corresponding to the column col of C (for matrix mult)
+        thisCoeff = @view in3[:,col+1,:] # the row of coeffs corresponding to column col of C
         # The first entry
         arr3[1] = -arr1[1] + alpha*arr2[2] + 2*beta*arr2[1]
-        newSlices[1] += thisCoeff * arr3[1]
+        @views out3[:,1,:] .+= arr3[1] .* thisCoeff
         # The second entry
         if maxRow > 2
             arr3[2] = -arr1[2] + alpha*(2*arr2[1] + arr2[3]) + 2*beta*arr2[2]
-            newSlices[2] += thisCoeff * arr3[2]
+            @views out3[:,2,:] .+= arr3[2] .* thisCoeff
         end
 
         # All middle entries
         for i in 3:maxRow-1
             arr3[i] = -arr1[i] + alpha*(arr2[i-1] + arr2[i+1]) + 2*beta*arr2[i]
-            # newSlices[i] += thisCoeff .* arr3[i]
-            newSlices[i] += thisCoeff * arr3[i]
+            @views out3[:,i,:] .+= arr3[i] .* thisCoeff
         end
 
         # The second to last entry
         i = maxRow
         arr3[i] = -arr1[i] + (i == 2 ? 2 : 1)*alpha*(arr2[i-1]) + 2*beta*arr2[i]
-        newSlices[i] += thisCoeff * arr3[i]
+        @views out3[:,i,:] .+= arr3[i] .* thisCoeff
         #The last entry
         finalVal = alpha*arr2[i]
         # This final entry is typically very small. If it is essentially machine epsilon,
         # zero it out to save calculations.
         if abs(finalVal) > 2.0^(-52) #TODO: Justify this val!
             arr3[maxRow+1] = finalVal
-            newSlices[maxRow+1] += thisCoeff * finalVal
+            @views out3[:,maxRow+1,:] .+= finalVal .* thisCoeff
             maxRow += 1 # Next column will have one more entry than the current column.
         end
 
@@ -319,9 +326,12 @@ function fast_transformChebInPlace1D(coeffs,alpha,beta)
         arr2 = arr3
         arr3 = arr
     end
-    VA = VectorOfArray(newSlices[1:maxRow])
-    return convert(Array,VA)
-    # return cat(newSlices[1:maxRow]...,dims = dims)
+    # Reshape back to N dimensions, with the transformed axis trimmed to maxRow.
+    # Bind maxRow to a fresh local that is never reassigned so the closure below does not capture
+    # (and therefore box) the loop-mutated maxRow, which would deoptimize the hot loop above.
+    mr = maxRow
+    outshape = ntuple(k -> k == workdim ? mr : size(coeffs, k), Val(N))
+    return reshape(out3[:, 1:mr, :], outshape)
 end
 
 function fast_TransformChebInPlaceND(coeffs, dim, alpha, beta, exact)
@@ -346,27 +356,16 @@ function fast_TransformChebInPlaceND(coeffs, dim, alpha, beta, exact)
         The new coefficient array following the transformation
     """
 
-    #TODO: Could we calculate the allowed error beforehand and pass it in here?
+        #TODO: Could we calculate the allowed error beforehand and pass it in here?
     #TODO: Make this work for the power basis polynomials
     if (((alpha == 1.0) && (beta == 0.0)) || (size(coeffs)[end-(dim-1)] == 1))
         return coeffs # No need to transform if the degree of dim is 0 or transformation is the identity.
     end
 
-    transformFunc = fast_transformChebInPlace1D
-
-    if dim == 1
-        return transformFunc(coeffs, alpha, beta)
-    else # Need to transpose the matrix to line up the multiplication for the current dim
-        ndim = length(size(coeffs))
-        # Move the current dimension to the dim 0 spot in the np array.
-        python_order = vcat([dim], collect(1:dim-1), collect(dim+1:ndim))
-        order = (ndim+1) .- reverse(python_order)
-        # Then transpose with the inverted order after the transformation occurs.
-        python_backOrder = zeros(Int,ndim)
-        python_backOrder[python_order] = collect(1:length(size(coeffs)))
-        backOrder = (ndim+1) .- reverse(python_backOrder)
-        return permutedims(transformFunc(permutedims(coeffs,order), alpha, beta),backOrder)
-    end
+    # The numpy dimension `dim` corresponds to the Julia dimension nd-dim+1. Transform that axis
+    # directly instead of permuting it to the last position and back.
+    nd = ndims(coeffs)
+    return fast_transformChebInPlace1D(coeffs, alpha, beta, nd - dim + 1)
 end
 
 function fast_getTransformationError(M,dim)
