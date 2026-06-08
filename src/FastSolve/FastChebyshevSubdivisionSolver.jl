@@ -43,7 +43,7 @@ function fast_TwoProdWithSplit(a,b,a1,a2)
     return x,y
 end 
 
-function fast_getLinearTerms(M)
+function fast_getLinearTerms(M::AbstractArray{T,N}) where {T,N}
     """Gets the linear terms of the Chebyshev coefficient tensor M.
 
     Uses the fact that the linear terms are located at
@@ -65,16 +65,16 @@ function fast_getLinearTerms(M)
     A: array
         An array with the linear terms of M
     """
-    A = []
+    A = Vector{T}(undef, N)
     spot = 1
-    newM = reshape(M,(1,length(M)))
-    
-    for i in size(M)
-        push!(A, (i) == 1 ? 0 : newM[spot+1])
-        spot *= (i)
+    newM = vec(M)
+    sz = size(M)
+    @inbounds for k in 1:N
+        i = sz[k]
+        A[N - k + 1] = (i == 1) ? zero(T) : newM[spot + 1]
+        spot *= i
     end
-
-    return reverse(A) # Return linear terms in dimension order.
+    return A
 end
 
 function fast_linearCheck1(totalErrs,A,consts)
@@ -259,79 +259,48 @@ function fast_transformChebInPlace1D(coeffs,alpha,beta,workdim=ndims(coeffs))
     if N == 1
         return fast_transformChebInPlace1D1D(coeffs,alpha,beta)
     end
-    last_dim_length = size(coeffs, workdim)
-    # Collapse the dimensions before/after workdim so coeffs is viewed as a fixed 3D array
-    # (before, workdim, after). This is type stable for any N and any target axis, and reshape
-    # shares memory (no copy), so the contraction accumulates in place with no permutedims.
-    before = 1
-    for k in 1:workdim-1
-        before *= size(coeffs, k)
-    end
-    after = 1
-    for k in workdim+1:N
-        after *= size(coeffs, k)
-    end
-    in3 = reshape(coeffs, before, last_dim_length, after)
-    out3 = zeros(before, last_dim_length, after)
-    # Initialize three arrays to represent subsequent columns of the transformation matrix.
+        last_dim_length = coeffs_shape[end]
+    dims = length(coeffs_shape)
+    transformedCoeffs = zeros(coeffs_shape)
     arr1 = zeros(last_dim_length)
     arr2 = zeros(last_dim_length)
     arr3 = zeros(last_dim_length)
-
-    #The first column of the transformation matrix C. Since T_0(alpha*x + beta) = T_0(x) = 1 has 1 in the top entry and 0's elsewhere.
     arr1[1] = 1
 
-    # The workdim slices are accumulated into directly (no per-column temporary arrays).
-    @views out3[:,1,:] .= in3[:,1,:] # arr1[0] * coeffs[0]
-    #The second column of C. Note that T_1(alpha*x + beta) = alpha*T_1(x) + beta*T_0(x).
+    # Views along the last axis (unit stride, SIMD-friendly accumulators)
+    oldSlices = eachslice(coeffs, dims=dims)
+    newSlices = eachslice(transformedCoeffs, dims=dims)
+
+    newSlices[1] .= oldSlices[1]
     arr2[1] = beta
     arr2[2] = alpha
-    @views out3[:,1,:] .+= beta .* in3[:,2,:] # arr2[0] * coeffs[1]
-    @views out3[:,2,:] .+= alpha .* in3[:,2,:] # arr2[1] * coeffs[1]
+    newSlices[1] .+= beta .* oldSlices[2]
+    newSlices[2] .+= alpha .* oldSlices[2]
     maxRow = 2
-    for col in 2:last_dim_length-1 # For each column, calculate each entry and do matrix mult
-        thisCoeff = @view in3[:,col+1,:] # the row of coeffs corresponding to column col of C
-        # The first entry
+    for col in 2:last_dim_length-1
+        thisCoeff = oldSlices[col+1]
         arr3[1] = -arr1[1] + alpha*arr2[2] + 2*beta*arr2[1]
-        @views out3[:,1,:] .+= arr3[1] .* thisCoeff
-        # The second entry
+        newSlices[1] .+= thisCoeff .* arr3[1]
         if maxRow > 2
             arr3[2] = -arr1[2] + alpha*(2*arr2[1] + arr2[3]) + 2*beta*arr2[2]
-            @views out3[:,2,:] .+= arr3[2] .* thisCoeff
+            newSlices[2] .+= thisCoeff .* arr3[2]
         end
-
-        # All middle entries
         for i in 3:maxRow-1
             arr3[i] = -arr1[i] + alpha*(arr2[i-1] + arr2[i+1]) + 2*beta*arr2[i]
-            @views out3[:,i,:] .+= arr3[i] .* thisCoeff
+            newSlices[i] .+= thisCoeff .* arr3[i]
         end
-
-        # The second to last entry
         i = maxRow
         arr3[i] = -arr1[i] + (i == 2 ? 2 : 1)*alpha*(arr2[i-1]) + 2*beta*arr2[i]
-        @views out3[:,i,:] .+= arr3[i] .* thisCoeff
-        #The last entry
+        newSlices[i] .+= thisCoeff .* arr3[i]
         finalVal = alpha*arr2[i]
-        # This final entry is typically very small. If it is essentially machine epsilon,
-        # zero it out to save calculations.
-        if abs(finalVal) > 2.0^(-52) #TODO: Justify this val!
+        if abs(finalVal) > 2.0^(-52)
             arr3[maxRow+1] = finalVal
-            @views out3[:,maxRow+1,:] .+= finalVal .* thisCoeff
-            maxRow += 1 # Next column will have one more entry than the current column.
+            newSlices[maxRow+1] .+= thisCoeff .* finalVal
+            maxRow += 1
         end
-
-        # Save the values of arr2 and arr3 to arr1 and arr2 to get ready for calculating the next column.
-        arr = arr1
-        arr1 = arr2
-        arr2 = arr3
-        arr3 = arr
+        arr = arr1; arr1 = arr2; arr2 = arr3; arr3 = arr
     end
-    # Reshape back to N dimensions, with the transformed axis trimmed to maxRow.
-    # Bind maxRow to a fresh local that is never reassigned so the closure below does not capture
-    # (and therefore box) the loop-mutated maxRow, which would deoptimize the hot loop above.
-    mr = maxRow
-    outshape = ntuple(k -> k == workdim ? mr : size(coeffs, k), Val(N))
-    return reshape(out3[:, 1:mr, :], outshape)
+    return transformedCoeffs[ntuple(_ -> Colon(), dims - 1)..., 1:maxRow]
 end
 
 function fast_TransformChebInPlaceND(coeffs, dim, alpha, beta, exact)
@@ -449,12 +418,13 @@ function fast_transformChebToInterval(Ms, alphas, betas, errors, exact)
         The new errors associated with the transformed coefficient matrices
     """
     #Transform the chebyshev polynomials
-    newMs = Vector{eltype(Ms)}()
-    newErrors = Vector{Float64}()
-    for (M,e) in zip(Ms, errors)
-        newM, newE = fast_transformCheb(M, alphas, betas, e, exact)
-        push!(newMs,newM)
-        push!(newErrors,(newE))
+    n = length(Ms)
+    newMs = Vector{Array{Float64}}(undef, n)
+    newErrors = Vector{Float64}(undef, n)
+    @inbounds for i in 1:n
+        newM, newE = fast_transformCheb(Ms[i], alphas, betas, errors[i], exact)
+        newMs[i] = newM
+        newErrors[i] = newE
     end
     return newMs, newErrors
 end
@@ -1108,20 +1078,22 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                         combinedInterval.interval = fast_copyInterval(combinedInterval.preFinalInterval)
                         combinedInterval.transforms = fast_copyInterval(combinedInterval.preFinalTransforms)
                     end
-                    newAs = minimum(reduce(hcat,[fast_getIntervalForCombining(resultExterior[idx1])[1,:], fast_getIntervalForCombining(resultExterior[idx2])[1,:]]),dims=2)
-                    newBs = maximum(reduce(hcat,[fast_getIntervalForCombining(resultExterior[idx1])[2,:], fast_getIntervalForCombining(resultExterior[idx2])[2,:]]),dims=2)
+                    ext1 = fast_getIntervalForCombining(resultExterior[idx1])
+                    ext2 = fast_getIntervalForCombining(resultExterior[idx2])
+                    newAs = reshape(min.(ext1[1,:], ext2[1,:]), :, 1)
+                    newBs = reshape(max.(ext1[2,:], ext2[2,:]), :, 1)
                     final1 = fast_getFinalInterval(resultExterior[idx1])
                     final2 = fast_getFinalInterval(resultExterior[idx2])
-                    newAsFinal = minimum(reduce(hcat,[final1[1,:], final2[1,:]]),dims=2)
-                    newBsFinal = maximum(reduce(hcat,[final1[2,:], final2[2,:]]),dims=2)
+                    newAsFinal = reshape(min.(final1[1,:], final2[1,:]), :, 1)
+                    newBsFinal = reshape(max.(final1[2,:], final2[2,:]), :, 1)
                     oldAs = originalInterval.interval[1,:]
                     oldBs = originalInterval.interval[2,:]
-                    oldAsFinal, oldBsFinal = fast_getFinalInterval(originalInterval)[1,:],fast_getFinalInterval(originalInterval)[2,:]
+                    origFinal = fast_getFinalInterval(originalInterval)
+                    oldAsFinal, oldBsFinal = origFinal[1,:], origFinal[2,:]
                     #Find the final A and B values exactly. Then do the currSubinterval calculation exactly.
-                    #Look at what was done on the example that's failing and see why.
                     equalMask = oldBsFinal .== oldAsFinal
                     oldBsFinal[equalMask] = oldBsFinal[equalMask] .+ 1 #Avoid a divide by zero on the next line
-                    currSubinterval = ((2 .*reduce(hcat,[newAsFinal, newBsFinal]) .- oldAsFinal .- oldBsFinal)./(oldBsFinal .- oldAsFinal))'
+                    currSubinterval = ((2 .*hcat(newAsFinal, newBsFinal) .- oldAsFinal .- oldBsFinal)./(oldBsFinal .- oldAsFinal))'
                     #If the interval is exactly -1 or 1, make sure that shows up as exact.
                     currSubinterval[1,equalMask] .= -1
                     currSubinterval[2,equalMask] .= 1
@@ -1130,7 +1102,7 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                     #Update the current subinterval. Use the best transform we can get here, but use the exact combined
                     #interval for tracking
                     fast_addTransform(combinedInterval,currSubinterval)
-                    combinedInterval.interval = reduce(hcat,[newAs, newBs])'
+                    combinedInterval.interval = hcat(newAs, newBs)'
                     combinedInterval.reRun = true
                     deleteat!(resultExterior,idx2)
                     deleteat!(resultExterior,idx1)

@@ -1,4 +1,4 @@
-import FFTW: r2r #This is the DCT-I function that takes in a matrix and a transform "kind"
+import FFTW: r2r, r2r! #This is the DCT-I function that takes in a matrix and a transform "kind"
 import FFTW: REDFT00 #This is the enum that represents DCT-I 
 using Statistics
 
@@ -256,52 +256,95 @@ function fast_intervalApproximateND(f, degs, a, b, retSupNorm = false)
     supNorm : float (optional)
         The sup norm of the function, approximated as the maximum function evaluation.
     """
-    dim = length(degs)
+        dim = length(degs)
+    # Dispatch on Val(dim) so the body specializes on the static dimension
+    return _fast_intervalApproximateND_impl(f, degs, a, b, retSupNorm, Val(dim))
+end
+
+function _fast_intervalApproximateND_impl(@nospecialize(f), degs, a, b, retSupNorm::Bool,
+                                          ::Val{N}) where {N}
     # If any dimension has degree 0, turn it to degree 1 (will be sliced out at the end)
-    originalDegs = copy(degs)
-    degs[degs .== 0] .= 1 
-
-    # Get the Chebyshev Grid Points
-    cheb_grid = fast_createMeshgrid([fast_transformPoints(cos.(collect(0:deg)*(pi/deg)), a_,b_) 
-                                    for (deg, a_, b_) in zip(degs, a, b)]...)
-    cheb_pts = reshape(vcat(map(x -> reshape(x,(1,length(x))),cheb_grid)...),(dim,:))
-    values = reshape(mapslices(x->f(x...),cheb_pts,dims=1),Tuple(reverse(degs.+1)))
-    #Get the supNorm if we want it
-    if retSupNorm
-        supNorm = maximum(abs.(values))
+    originalDegs = ntuple(d -> @inbounds(degs[d]), Val(N))
+    anyZeroDeg = false
+    @inbounds for i in 1:N
+        if degs[i] == 0
+            degs[i] = 1
+            anyZeroDeg = true
+        end
     end
 
-    #Divide edges by 2 for DCT: (UNNECESARY WITH JULIA DCT)
-    # for d in reverse(1:dim)
-    #     values[[i != d ? Colon() : 1 for i in reverse(1:dim)]...] /= 2
-    #     values[[i != d ? Colon() : degs[i]+1 for i in reverse(1:dim)]...] /= 2
-    # end
-
-    #Perform Type-I DCT
-    #https://github.com/JuliaMath/FFTW.jl/blob/master/src/fft.jl 
-    #http://www.fftw.org/doc/1d-Real_002deven-DFTs-_0028DCTs_0029.html
-    coeffs = r2r(values ./ prod(degs), REDFT00) 
-    # transpose array if it is only one dimensional since r2r doesn't put it in the format we need
-    if length(degs) == 1
-        coeffs = coeffs'
-    end
-    #Perform Type-I DCT
-    #https://github.com/JuliaMath/FFTW.jl/blob/master/src/fft.jl 
-    #http://www.fftw.org/doc/1d-Real_002deven-DFTs-_0028DCTs_0029.html
-
-    #Divide edges by 2 post DCT
-    for d in reverse(1:dim)
-        coeffs[[i != d ? Colon() : 1 for i in reverse(1:dim)]...] /= 2
-        coeffs[[i != d ? Colon() : degs[i]+1 for i in reverse(1:dim)]...] /= 2
+    # Pre-compute Chebyshev grid points per dimension
+    pts_per_dim = ntuple(Val(N)) do d
+        deg = @inbounds degs[d]
+        a_ = @inbounds a[d]
+        b_ = @inbounds b[d]
+        pd = pi / deg
+        scale = (b_ - a_) / 2
+        shift = (b_ + a_) / 2
+        v = Vector{Float64}(undef, deg + 1)
+        @inbounds for k in 0:deg
+            v[k + 1] = scale * cos(k * pd) + shift
+        end
+        v
     end
 
-    #Return the coefficient tensor and the sup norm
-    slices = [collect(1:d+1) for d in originalDegs] # get values corresponding to originalDegs only
-    if retSupNorm
-        return coeffs[reverse(slices)...], supNorm
-    else
-        return coeffs[reverse(slices)...]
+    # Allocate output array with shape reverse(degs.+1) and fill directly with f(args...)
+    out_shape = ntuple(d -> (@inbounds degs[N - d + 1]) + 1, Val(N))
+    values = Array{Float64,N}(undef, out_shape)
+    supNorm = _fill_cheb_values!(values, f, pts_per_dim, retSupNorm)
+
+    # Perform Type-I DCT in place. FFTW's REDFT00 already absorbs the edge-halving on input.
+    inv_prod = 1.0 / prod(degs)
+    @inbounds @simd for i in eachindex(values)
+        values[i] *= inv_prod
     end
+    r2r!(values, REDFT00)
+    coeffs = values
+
+    # Halve edge slices along every dimension (must be done before reshape/transpose)
+    _halve_edges!(coeffs, Val(N))
+
+    if anyZeroDeg
+        slices = ntuple(d -> 1:((@inbounds originalDegs[N - d + 1]) + 1), Val(N))
+        coeffs = coeffs[slices...]
+    end
+    # Transpose 1D result so caller sees the same shape as before
+    if N == 1
+        return retSupNorm ? (coeffs', supNorm) : coeffs'
+    end
+    return retSupNorm ? (coeffs, supNorm) : coeffs
+end
+
+@generated function _gather_args(pts::NTuple{N,Vector{T}}, J::CartesianIndex{N}) where {N,T}
+    return Expr(:tuple, [:(@inbounds pts[$d][J.I[$(N - d + 1)]]) for d in 1:N]...)
+end
+
+@inline function _fill_cheb_values!(values::AbstractArray{T,N}, f::F,
+                                    pts_per_dim::NTuple{N,Vector{T}}, retSupNorm::Bool) where {T,N,F}
+    sup = zero(T)
+    @inbounds for J in CartesianIndices(values)
+        args = _gather_args(pts_per_dim, J)
+        v = f(args...)
+        values[J] = v
+        if retSupNorm
+            av = abs(v)
+            if av > sup
+                sup = av
+            end
+        end
+    end
+    return sup
+end
+
+@inline function _halve_edges!(coeffs::AbstractArray{T,N}, ::Val{N}) where {T,N}
+    @inbounds for ax in 1:N
+        n = size(coeffs, ax)
+        first_slice = ntuple(k -> k == ax ? (1:1) : axes(coeffs, k), Val(N))
+        last_slice  = ntuple(k -> k == ax ? (n:n) : axes(coeffs, k), Val(N))
+        @views coeffs[first_slice...] ./= 2
+        @views coeffs[last_slice...]  ./= 2
+    end
+    return coeffs
 end
 
 function fast_createMeshgrid(arrays...)
