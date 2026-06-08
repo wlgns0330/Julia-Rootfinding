@@ -1,13 +1,30 @@
 using RecursiveArrayTools
 
+function clean_coeff(coeff)
+    """Trims trailing all-zero slices (the highest-degree coefficients) along each axis,
+    mirroring the Python yroots Polynomial.clean_coeff. Returns the trimmed array. Never
+    shrinks an axis below length 1. Because only all-zero slices are removed, trimming one
+    axis cannot change another axis's all-zero status, so a single pass per axis suffices."""
+    c = coeff
+    for ax in 1:ndims(c)
+        while size(c, ax) > 1 && all(iszero, selectdim(c, ax, size(c, ax)))
+            c = copy(selectdim(c, ax, 1:size(c, ax)-1))
+        end
+    end
+    return c
+end
+
 struct MultiPower
     """Contains the coeffs array for a MultiPower object"""
     coeff
     dim
 
-    function MultiPower(coeff)
-        dim = ndims(coeff)
-        new(to_julia(coeff),dim)
+    function MultiPower(coeff; clean_zeros=true)
+        c = to_julia(coeff)
+        if clean_zeros
+            c = clean_coeff(c)
+        end
+        new(c, ndims(c))
     end
 end
 
@@ -15,11 +32,14 @@ struct MultiCheb
     """Contains the coeffs array for a MultiCheb object"""
     coeff
     dim
-    function MultiCheb(coeff)
-        dim = ndims(coeff)
-        new(to_julia(coeff),dim)
-    end
 
+    function MultiCheb(coeff; clean_zeros=true)
+        c = to_julia(coeff)
+        if clean_zeros
+            c = clean_coeff(c)
+        end
+        new(c, ndims(c))
+    end
 end
 
 function to_python(A)
@@ -41,6 +61,9 @@ function to_julia(A)
 
     s = size(A)
     dim = length(s)
+    if dim < 2
+        return A # A 1D array is already in the correct order; nothing to permute.
+    end
     dim_order = collect(dim:-1:1)
     dim_order[1] = dim-1
     dim_order[2] = dim
