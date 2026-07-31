@@ -1045,15 +1045,15 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                 return [trackedInterval], []
             end
         else
-            #Combine all roots that converged to the same point.
-            allFoundRoots = Set([])
+            macheps = type(2)^-(precision-1)
+            trackedDimSize = dimSize(trackedInterval)
+            mergeTol = any(trackedDimSize .< macheps) ? maximum(trackedDimSize) : type(0.0)
             tempResults = []
             for result in resultsAll
-                point = Tuple(result.interval[1,:])
-                if point in allFoundRoots
+                point = getFinalPoint(result)
+                if any(isapprox(point, getFinalPoint(existing); atol=mergeTol, rtol=0) for existing in tempResults)
                     continue
                 end
-                push!(allFoundRoots,point)
                 push!(tempResults,result)
             end
             for result in tempResults

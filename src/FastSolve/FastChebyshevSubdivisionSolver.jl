@@ -1046,15 +1046,23 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                 return [trackedInterval], []
             end
         else
-            #Combine all roots that converged to the same point.
-            allFoundRoots = Set([])
+            #Combine all roots that converged to the same point. A dimension of trackedInterval that
+            #has already collapsed to (near) machine-epsilon width means the Jacobian is singular along
+            #that dimension, which happens at a tangential/multiple root: different subdivision paths
+            #through it converge to points that are extremely close but not bit-identical along the
+            #remaining dimension(s), so those need to be clustered by distance rather than exact equality.
+            #When no dimension is degenerate, the results are more likely genuinely distinct simple roots
+            #that just happen to lie close together, so we keep the stricter exact-equality behavior to
+            #avoid merging them.
+            macheps = 2. ^-52
+            trackedDimSize = fast_dimSize(trackedInterval)
+            mergeTol = any(trackedDimSize .< macheps) ? maximum(trackedDimSize) : 0.0
             tempResults = []
             for result in resultsAll
-                point = Tuple(result.interval[1,:])
-                if point in allFoundRoots
+                point = fast_getFinalPoint(result)
+                if any(isapprox(point, fast_getFinalPoint(existing); atol=mergeTol, rtol=0) for existing in tempResults)
                     continue
                 end
-                push!(allFoundRoots,point)
                 push!(tempResults,result)
             end
             for result in tempResults
