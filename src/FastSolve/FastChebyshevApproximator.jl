@@ -1,4 +1,4 @@
-import FFTW: r2r, r2r! #This is the DCT-I function that takes in a matrix and a transform "kind"
+import FFTW: r2r! #This is the DCT-I function that takes in a matrix and a transform "kind"
 import FFTW: REDFT00 #This is the enum that represents DCT-I 
 using Statistics
 
@@ -308,9 +308,11 @@ function _fast_intervalApproximateND_impl(@nospecialize(f), degs, a, b, retSupNo
         slices = ntuple(d -> 1:((@inbounds originalDegs[N - d + 1]) + 1), Val(N))
         coeffs = coeffs[slices...]
     end
-    # Transpose 1D result so caller sees the same shape as before
+    # Flatten 1D result back to a plain Vector so ndims(coeffs) == 1, matching the pre-refactor
+    # return type. Returning a (1,N) Adjoint here instead would make downstream code (e.g.
+    # fast_transformChebInPlace1D's ndims(coeffs)==1 fast path) skip the univariate fast path.
     if N == 1
-        return retSupNorm ? (coeffs', supNorm) : coeffs'
+        return retSupNorm ? (vec(coeffs), supNorm) : vec(coeffs)
     end
     return retSupNorm ? (coeffs, supNorm) : coeffs
 end
