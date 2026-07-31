@@ -29,28 +29,33 @@ mutable struct FastTrackedInterval
 
     # This struct is implemented by passing in one argument "interval"
     # eg: TrackedInterval([-1;-3.4;0])
-    topInterval # = interval (by default) 
-    interval # = interval (by default) 
-    transforms # = [] (by default)
-    ndim # = length(interval) (by default)
-    empty # = false (by default)
-    finalStep # = false (by default)
-    canThrowOutFinalStep # = false (by default)
-    possibleDuplicateRoots # = [] (by default)
-    possibleExtraRoot # = false (by default)
-    nextTransformPoints #Random Point near 0
-    preFinalInterval # = [] (by default)
-    preFinalTransforms # = [] (by default)
-    reducedDims # = [] (by default)
-    solvedVals # = [] (by default)
-    finalInterval # = [] (by default)
-    finalAlpha # = 0 (by default)
-    finalBeta # = 0 (by default)
-    reRun # = false (by default)
-    root # = [] (by default)
-    function FastTrackedInterval(interval)
-        ndim = Int(length(interval)/2)
-        new(interval,interval,[],ndim,false,false,false,[],false,fill(0.0394555475981047,ndim),[],[],[],[],[], 1, 0, false,[])
+    topInterval::Matrix{Float64}
+    interval::Matrix{Float64}
+    transforms::Vector{Matrix{Float64}}
+    ndim::Int
+    empty::Bool
+    finalStep::Bool
+    canThrowOutFinalStep::Bool
+    possibleDuplicateRoots::Vector{Any}
+    possibleExtraRoot::Bool
+    nextTransformPoints::Vector{Float64}
+    preFinalInterval::Matrix{Float64}
+    preFinalTransforms::Vector{Matrix{Float64}}
+    reducedDims::Vector{Int}
+    solvedVals::Vector{Float64}
+    finalInterval::Matrix{Float64}
+    finalAlpha::Any
+    finalBeta::Any
+    reRun::Bool
+    root::Vector{Float64}
+    function FastTrackedInterval(interval::AbstractMatrix)
+        m = Matrix{Float64}(interval)
+        ndim = Int(length(m)/2)
+        empty_mat = Matrix{Float64}(undef, 0, 0)
+        new(m, copy(m), Matrix{Float64}[], ndim, false, false, false,
+            Any[], false, fill(0.0394555475981047, ndim),
+            empty_mat, Matrix{Float64}[], Int[], Float64[], empty_mat,
+            1, 0, false, Float64[])
     end
 end
 

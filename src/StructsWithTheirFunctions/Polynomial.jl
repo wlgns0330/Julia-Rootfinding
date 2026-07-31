@@ -1,13 +1,30 @@
 using RecursiveArrayTools
 
+function clean_coeff(coeff)
+    """Trims trailing all-zero slices (the highest-degree coefficients) along each axis,
+    mirroring the Python yroots Polynomial.clean_coeff. Returns the trimmed array. Never
+    shrinks an axis below length 1. Because only all-zero slices are removed, trimming one
+    axis cannot change another axis's all-zero status, so a single pass per axis suffices."""
+    c = coeff
+    for ax in 1:ndims(c)
+        while size(c, ax) > 1 && all(iszero, selectdim(c, ax, size(c, ax)))
+            c = copy(selectdim(c, ax, 1:size(c, ax)-1))
+        end
+    end
+    return c
+end
+
 struct MultiPower
     """Contains the coeffs array for a MultiPower object"""
     coeff
     dim
 
-    function MultiPower(coeff)
-        dim = ndims(coeff)
-        new(to_julia(coeff),dim)
+    function MultiPower(coeff; clean_zeros=true)
+        c = to_julia(coeff)
+        if clean_zeros
+            c = clean_coeff(c)
+        end
+        new(c, ndims(c))
     end
 end
 
@@ -15,11 +32,14 @@ struct MultiCheb
     """Contains the coeffs array for a MultiCheb object"""
     coeff
     dim
-    function MultiCheb(coeff)
-        dim = ndims(coeff)
-        new(to_julia(coeff),dim)
-    end
 
+    function MultiCheb(coeff; clean_zeros=true)
+        c = to_julia(coeff)
+        if clean_zeros
+            c = clean_coeff(c)
+        end
+        new(c, ndims(c))
+    end
 end
 
 function to_python(A)
@@ -41,6 +61,9 @@ function to_julia(A)
 
     s = size(A)
     dim = length(s)
+    if dim < 2
+        return A # A 1D array is already in the correct order; nothing to permute.
+    end
     dim_order = collect(dim:-1:1)
     dim_order[1] = dim-1
     dim_order[2] = dim
@@ -124,41 +147,28 @@ function multipower_to_cheb(coeffs)
         return Bs
     end
     function to_cheb1D(coeffs)
-        """Transforms to chebyshev coeficcients along the first dimension of coeffs matrix"""
-        cheb_coeffs = zero(coeffs)
-        As = []
-        # Update As, then take each slice of the coefficient matrix and matrix multiply 
-        # by As, and add to the cheb_coeffs matrix.
-        dims = length(size(coeffs))
-        slices = []
-        for i in 1:dims
-            push!(slices,:)
-        end
-        slices[end] = 1:2
-        for (i,coeff) in enumerate(eachslice(coeffs,dims=dims))
+        cheb_coeffs = zeros(eltype(coeffs), size(coeffs))
+        As = Float64[]
+        n1 = size(coeffs, 1)
+        for i in 1:n1
             As = get_new_As(As)
-            slices[end] = 1:i
-            # Invoke einsum to do the right matrix multiplication in n dimensions
-            cheb_coeffs[slices...] += convert(Array,VectorOfArray([val*coeff for val in As]))
-            #np.expand_dims(As,axis=1)@np.array([coeff])
+            coeff_i = selectdim(coeffs, 1, i)   # view, no copy
+            for k in 1:i
+                selectdim(cheb_coeffs, 1, k) .+= As[k] .* coeff_i
+            end
         end
         return cheb_coeffs
     end
-    function to_chebND(coeffs,dim)
-        """Transforms to chebyshev coefficients along the dim axis of the coeffs matrix"""
-        # Get the transopse order to make the desired dim first
-        order = append!([dim],collect(1:dim-1),collect(dim+1:ndims(coeffs)))
-        temp = order[end]
-        order[end] = order[end-1]
-        order[end-1] = temp
-        order = reverse(order)
-        # Then transpose with the inverted order after the transformation occurs.
-        backOrder = zeros(Int64,ndims(coeffs))
-        backOrder[order] = 1:ndims(coeffs)
-        # Transpose coeffs, transform them along the first dimension, then transpose them back.
-        return permutedims(to_cheb1D(permutedims(coeffs,order)),backOrder)
+    function to_chebND(coeffs, dim)
+        nd = ndims(coeffs)
+        order = Tuple(vcat(dim, [i for i in 1:nd if i != dim]))
+        backOrder = Vector{Int}(undef, nd)
+        for (i, o) in enumerate(order); backOrder[o] = i; end
+        rotated     = PermutedDimsArray(coeffs, order)  # lazy view — no copy
+        transformed = to_cheb1D(rotated)
+        return permutedims(transformed, backOrder)
     end
-
+    
 
     cheb_coeffs = coeffs
     for dim in 1:ndims(coeffs)
