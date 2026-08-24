@@ -36,7 +36,7 @@ mutable struct FastTrackedInterval
     empty::Bool
     finalStep::Bool
     canThrowOutFinalStep::Bool
-    possibleDuplicateRoots::Vector{Any}
+    possibleDuplicateRoots::Vector{Vector{Float64}}
     possibleExtraRoot::Bool
     nextTransformPoints::Vector{Float64}
     preFinalInterval::Matrix{Float64}
@@ -53,7 +53,7 @@ mutable struct FastTrackedInterval
         ndim = Int(length(m)/2)
         empty_mat = Matrix{Float64}(undef, 0, 0)
         new(m, copy(m), Matrix{Float64}[], ndim, false, false, false,
-            Any[], false, fill(0.0394555475981047, ndim),
+            Vector{Float64}[], false, fill(0.0394555475981047, ndim),
             empty_mat, Matrix{Float64}[], Int[], Float64[], empty_mat,
             Float64[], Float64[], false, Float64[])
     end

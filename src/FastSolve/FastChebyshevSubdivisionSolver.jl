@@ -373,6 +373,9 @@ function fast_transformChebInPlace1D(coeffs,alpha,beta,workdim=ndims(coeffs))
     # (and therefore box) the loop-mutated maxRow, which would deoptimize the hot loop above.
     mr = maxRow
     outshape = ntuple(k -> k == workdim ? mr : size(coeffs, k), Val(N))
+    # Nothing was trimmed, so out3 already holds exactly the result: reshape it (which shares
+    # memory) instead of copying a second full-size array out of it.
+    mr == last_dim_length && return reshape(out3, outshape)
     return reshape(out3[:, 1:mr, :], outshape)
 end
 
@@ -985,58 +988,66 @@ function fast_trimMs(Ms, errors, relApproxTol=1e-3, absApproxTol=2^(-52))
     for polyNum in 1:dim #Loop through the polynomials
         allowedErrorIncrease = absApproxTol + errors[polyNum] * relApproxTol
         for currDim in dim:-1:1
-            # Sum the highest-degree slice along currDim. The old code built an untyped `slices`
-            # vector and splatted it, which made every index dynamic and materialized both the
-            # slice and its abs, once per iteration of the loop below.
-            lastSum = fast_absSumTopSlice(Ms[polyNum], currDim, buf)
+            # Count how many of the highest-degree slices along currDim can go, then copy once.
+            # Trimming one slice at a time copied the whole tensor per slice removed, and the old
+            # code additionally built an untyped `slices` vector and splatted it, which made every
+            # index dynamic and materialized both the slice and its abs on each pass.
+            #
+            # A trimmed tensor is a prefix of the untrimmed one along currDim, so slice j holds
+            # the same values in the same order either way and can be summed off the original.
+            M = Ms[polyNum]
+            size_d = size(M, currDim)
+            kept = size_d
+            # Sum the highest-degree slice along currDim.
+            lastSum = fast_absSumSliceAt(M, currDim, kept, buf)
             # Iteratively eliminate the highest degree row of the current dimension if
             # the sum of its approximation coefficients is of low error, but keep deg at least 2
-            while (lastSum < allowedErrorIncrease) && (size(Ms[polyNum])[currDim] > 3)
-                # Trim the polynomial
-                Ms[polyNum] = fast_dropTopSlice(Ms[polyNum], currDim)
+            while (lastSum < allowedErrorIncrease) && (kept > 3)
                 # Update the remaining error increase allowed an the error of the approximation.
                 allowedErrorIncrease -= lastSum
                 errors[polyNum] += lastSum
                 # Reset for the next iteration with the next highest degree of the current dimension.
-                lastSum = fast_absSumTopSlice(Ms[polyNum], currDim, buf)
+                kept -= 1
+                lastSum = fast_absSumSliceAt(M, currDim, kept, buf)
+            end
+            if kept < size_d
+                Ms[polyNum] = fast_keepFirst(M, currDim, kept)
             end
         end
     end
 end
 
-"""Sum of |M| over the highest-degree slice along dimension `d`.
+"""Sum of |M| over slice `j` along dimension `d`.
 
 Gathers the slice into a dense buffer and reduces that, rather than reducing a strided view:
 a view reduces in a different order and so would not agree to the last bit with the
-`sum(abs.(M[slice...]))` this replaces. Compared to that expression this still saves the second
-full-size temporary (the `abs.`), and the buffer is reused across the trimming loop."""
-function fast_absSumTopSlice(M::AbstractArray{Float64}, d::Int,
-                             buf::Vector{Float64} = Vector{Float64}())
+`sum(abs.(M[slice...]))` this replaces. The buffer is reused across the trimming loop."""
+function fast_absSumSliceAt(M::AbstractArray{Float64}, d::Int, j::Int,
+                            buf::Vector{Float64} = Vector{Float64}())
     before = 1
     @inbounds for k in 1:d-1
         before *= size(M, k)
     end
-    n_d = size(M, d)
     after = 1
     @inbounds for k in d+1:ndims(M)
         after *= size(M, k)
     end
     n = before * after
     resize!(buf, n)          # keeps the capacity it already grew to
-    period = before * n_d
-    off = (n_d - 1) * before
+    period = before * size(M, d)
+    off = (j - 1) * before
     p = 0
-    @inbounds for j in 0:after-1, i in 1:before
-        buf[p += 1] = M[off + i + j * period]
+    @inbounds for c in 0:after-1, i in 1:before
+        buf[p += 1] = M[off + i + c * period]
     end
     return sum(abs, buf)
 end
 
-"""Copy of M with the highest-degree slice along dimension `d` removed."""
-function fast_dropTopSlice(M::AbstractArray{Float64,N}, d::Int) where {N}
+"""Copy of M keeping only the first `kept` slices along dimension `d`."""
+function fast_keepFirst(M::AbstractArray{Float64,N}, d::Int, kept::Int) where {N}
     # A homogeneous NTuple{N,UnitRange{Int}}: mixing UnitRange and OneTo here would make the
     # index tuple heterogeneous and box it.
-    idx = ntuple(k -> 1:(k == d ? size(M, d) - 1 : size(M, k)), Val(N))
+    idx = ntuple(k -> 1:(k == d ? kept : size(M, k)), Val(N))
     return M[idx...]
 end
 
