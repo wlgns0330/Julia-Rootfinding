@@ -34,6 +34,29 @@ function fast_twoProd(a,b)
     return x,y
 end
 
+# Scalar forms of the three routines above. The array versions broadcast, which allocates half a
+# dozen temporaries per call; the transform replay in FastTrackedInterval calls them once per
+# saved transform per root, so the temporaries dominated there. Element for element these compute
+# exactly the same floating point operations as the broadcasts.
+@inline function fast_splitScalar(a::Float64)
+    c = (2^27 + 1) * a
+    x = c - (c - a)
+    return x, a - x
+end
+
+@inline function fast_twoSumScalar(a::Float64, b::Float64)
+    x = a + b
+    z = x - a
+    return x, (a - (x - z)) + (b - z)
+end
+
+@inline function fast_twoProdScalar(a::Float64, b::Float64)
+    x = a * b
+    a1, a2 = fast_splitScalar(a)
+    b1, b2 = fast_splitScalar(b)
+    return x, a2 * b2 - (((x - a1 * b1) - a2 * b1) - a1 * b2)
+end
+
 # TODO: import from a library instead
 function fast_TwoProdWithSplit(a,b,a1,a2)
     """Returns x,y such that a*b = x+y exactly and a*b = x in floating point but with a already split."""
@@ -65,16 +88,35 @@ function fast_getLinearTerms(M)
     A: array
         An array with the linear terms of M
     """
-    A = []
+    # Index the tensor directly rather than building an untyped list: `A = []` gave a Vector{Any},
+    # which forced every caller to convert, and boxed each coefficient on the way in.
+    N = ndims(M)
+    A = Vector{Float64}(undef, N)
     spot = 1
-    newM = reshape(M,(1,length(M)))
-    
-    for i in size(M)
-        push!(A, (i) == 1 ? 0 : newM[spot+1])
-        spot *= (i)
+    @inbounds for d in 1:N
+        s = size(M, d)
+        # Fill from the back so the result is already in dimension order (the old code reversed).
+        A[N - d + 1] = s == 1 ? 0.0 : M[spot + 1]
+        spot *= s
     end
+    return A
+end
 
-    return reverse(A) # Return linear terms in dimension order.
+"""Writes the linear terms of each M in `Ms` into the columns of `A`, which must be dim x dim.
+
+The same work as calling `fast_getLinearTerms` once per polynomial and hcat-ing the results, but
+without the intermediate vectors."""
+function fast_fillLinearTerms!(A::Matrix{Float64}, Ms)
+    N = size(A, 1)
+    @inbounds for (j, M) in enumerate(Ms)
+        spot = 1
+        for d in 1:N
+            s = size(M, d)
+            A[N - d + 1, j] = s == 1 ? 0.0 : M[spot + 1]
+            spot *= s
+        end
+    end
+    return A
 end
 
 function fast_linearCheck1(totalErrs,A,consts)
@@ -99,10 +141,10 @@ function fast_linearCheck1(totalErrs,A,consts)
         lower bound
         
     """
-    dim = length(A[1,:])
-    a = -ones(dim) * Inf
-    b = ones(dim) * Inf
-    for row in 1:dim
+    dim = size(A, 2)
+    a = fill(-Inf, dim)
+    b = fill(Inf, dim)
+    @inbounds for row in 1:dim
         for col in 1:dim
             if abs(A[col,row]) > 2.0^(-52) #Don't bother running the check if the linear term is too small.
                 v1 = totalErrs[row] / abs(A[col,row]) - 1
@@ -389,7 +431,7 @@ function fast_getTransformationError(M,dim)
     """
 
     machEps = 2.0^(-52)
-    error = reverse(size(M))[dim] * machEps * sum(abs.(M))
+    error = size(M, ndims(M) - dim + 1) * machEps * sum(abs, M)
     return error #TODO: Figure out a more rigurous bound!
 end
 
@@ -503,38 +545,59 @@ function fast_boundingIntervalLinearSystem(Ms, errors, finalStep)
     minZoomForChange = 0.99 #If the volume doesn't shrink by this amount say that it hasn't changed
     minZoomForBaseCaseEnd = 0.4^dim #If the volume doesn't change by at least this amount when running with no error, stop
     #Get the matrix of the linear terms
-    A = Matrix{Float64}(reduce(hcat,[fast_getLinearTerms(M) for M in Ms]))
+    A = Matrix{Float64}(undef, dim, dim)
+    fast_fillLinearTerms!(A, Ms)
     #Get the Vector of the constant terms
-    consts = [M[1] for M in Ms]'
+    consts = Vector{Float64}(undef, dim)
     #Get the Error of everything else combined.
-    totalErrs = [sum(abs.(Ms[i])) + errors[i] for i = 1:dim]'
-    linear_sums = sum(abs.(A),dims=1)
-    err = totalErrs - abs.(consts) - linear_sums
+    totalErrs = Vector{Float64}(undef, dim)
+    @inbounds for i in 1:dim
+        consts[i] = Ms[i][1]
+        # sum(abs, M) rather than sum(abs.(M)): the latter materialized a full copy of every
+        # coefficient tensor on every interval, which dominated this function.
+        totalErrs[i] = sum(abs, Ms[i]) + errors[i]
+    end
+    err = Vector{Float64}(undef, dim)
+    @inbounds for i in 1:dim
+        linear_sum = 0.0
+        for r in 1:dim
+            linear_sum += abs(A[r, i])
+        end
+        err[i] = totalErrs[i] - abs(consts[i]) - linear_sum
+    end
 
     #Scale all the polynomials relative to one another
-    errors = Base.copy(errors')
-    errors_0 = Base.copy(errors)
-    for i in 1:dim
-        scaleVal = maximum(abs.(A[:,i]))
+    errors = Base.copy(errors)
+    @inbounds for i in 1:dim
+        scaleVal = 0.0
+        for r in 1:dim
+            scaleVal = max(scaleVal, abs(A[r, i]))
+        end
         if scaleVal > 0
             s = 2.0^Int(floor(log2(abs(scaleVal))))
-            A[:,i] /= s
+            for r in 1:dim
+                A[r, i] /= s
+            end
             consts[i] /= s
             totalErrs[i] /= s
-            linear_sums[i] /= s
             err[i] /= s
             errors[i] /= s
         end
     end
     #Precondition the columns. (AP)X = B -> A(PX) = B. So scale columns, solve, then scale the solution.
     colScaler = ones(dim)
-    for i in 1:dim
-        scaleVal = maximum(abs.(A[i,:]))
+    @inbounds for i in 1:dim
+        scaleVal = 0.0
+        for c in 1:dim
+            scaleVal = max(scaleVal, abs(A[i, c]))
+        end
         if scaleVal > 0
             s = 2.0^(-floor(log2(abs(scaleVal))))
             colScaler[i] = s
-            totalErrs += abs.(A[i,:])' * (s - 1)
-            A[i,:] *= s
+            for c in 1:dim
+                totalErrs[c] += abs(A[i, c]) * (s - 1)
+                A[i, c] *= s
+            end
         end
     end
 
@@ -544,10 +607,16 @@ function fast_boundingIntervalLinearSystem(Ms, errors, finalStep)
     a0, b0 = fast_linearCheck1(totalErrs, A, consts)
     a_orig = a0
     b_orig = b0
-    U,S,Vh = svd(A')
+    F = svd(A')
+    S = F.S
     condNum = S[end]/S[1]
-    Ainv = ((1.0 ./ S).*Vh')' * (U')
-    center = -Ainv*consts'
+    # Ainv = V * diag(1/S) * U'. Built directly instead of through a chain of adjoints and
+    # broadcasts, each of which allocated a dim x dim temporary.
+    # Kept as the original chain of matrix products: on dim x dim with dim <= 4 this is not hot,
+    # and hand-rolling the sums changes the last bit of the result relative to BLAS.
+    Ainv = ((1.0 ./ S) .* F.V')' * (F.U')
+    center = -Ainv * consts
+    absAinv = abs.(Ainv)
     wellConditioned = S[1] > 0 && condNum > 1e-10
     machEps = 2.0^(-52)
     widthToAdd = max(condNum,2)*machEps
@@ -555,30 +624,36 @@ function fast_boundingIntervalLinearSystem(Ms, errors, finalStep)
         #Now do the linear solve check
         #We use the matrix inverse to find the width, so might as well use it both spots. Should be fine as dim is small.
         if wellConditioned #Make sure conditioning is ok.
-            width = abs.(Ainv)*err'
-            a1 = center-width
-            b1 = center + width
-            a = max.(a0, a1)
-            b = min.(b0, b1)
+            width = absAinv * err
+            a = max.(a0, center .- width)
+            b = min.(b0, center .+ width)
         else
+            # Deliberately aliases a0/b0, as before: the in-place scaling below is meant to carry
+            # over to the second pass through this loop.
             a = a0
             b = b0
         end
-        #Undo the column preconditioning
-        a .*= colScaler
-        b .*= colScaler
-        #Add error and bound
-        a .-= widthToAdd
-        b .+= widthToAdd
-        throwOut = any(a .> b) || any(a .> 1) || any(b .< -1)
-        a[a .< -1] .= -1
-        b[b .< -1] .= -1
-        a[a .> 1] .= 1
-        b[b .> 1] .= 1
+        # Undo the column preconditioning, add the error, bound to [-1,1] and take the volume
+        # ratio -- all in one pass, instead of a dozen broadcasts each allocating a temporary
+        # (the comparisons alone allocated four BitArrays per iteration).
+        throwOut = false
+        volume = 1.0
+        @inbounds for d in 1:dim
+            ad = a[d] * colScaler[d] - widthToAdd
+            bd = b[d] * colScaler[d] + widthToAdd
+            throwOut |= (ad > bd) | (ad > 1) | (bd < -1)
+            ad < -1 && (ad = -1.0)
+            bd < -1 && (bd = -1.0)
+            ad > 1 && (ad = 1.0)
+            bd > 1 && (bd = 1.0)
+            a[d] = ad
+            b[d] = bd
+            volume *= bd - ad
+        end
 
         forceShouldStop = finalStep && !wellConditioned
         # Calculate the "changed" variable
-        newRatio = prod(b - a) ./ 2.0^dim
+        newRatio = volume / 2.0^dim
         changed = false
         if throwOut
             changed = true
@@ -698,7 +773,7 @@ function fast_getSubdivisionDims(Ms,trackedInterval,level)
     """
     dim = length(Ms)
     dims_to_consider = collect(1:dim)
-    new_dims = []
+    new_dims = Int[]
     for i in 1:dim
         if !isapprox(trackedInterval.interval[1,i], trackedInterval.interval[2,i],rtol=1e-5,atol=1e-8) || (i == dim && length(new_dims) == 0)
             push!(new_dims,dims_to_consider[i])
@@ -760,17 +835,30 @@ function fast_getInverseOrder(order)
         matrices resulting from the subdivision as if the original matrix had been subdivided in
         numerical order
     """
-    t = ones(length(order))
-    t[sortperm(order)] = collect(0:length(t)-1)
-    order = t
-    len = length(order)-1
-    order = Int.([2^(len-x) for x in order])
-    combinations = Iterators.product(fill([0,1],len+1)...)
-    newOrder_matrix = [collect(reverse(i))'*order for i in combinations]
-    newOrder = reshape(newOrder_matrix,(1,length(newOrder_matrix)))
-    invOrder = ones(length(newOrder))
-    invOrder[newOrder .+ 1] = collect(1:length(newOrder))
-    return Tuple(Int.(invOrder))
+    n = length(order)
+    # Rank of each entry of `order`; the old code round-tripped this through Float64 and then
+    # back through Int.
+    weights = Vector{Int}(undef, n)
+    perm = sortperm(order)
+    @inbounds for (rank, pos) in enumerate(perm)
+        weights[pos] = 1 << (n - rank)
+    end
+    total = 1 << n
+    invOrder = Vector{Int}(undef, total)
+    # Enumerate the 2^n sign patterns directly rather than through Iterators.product plus a
+    # reverse, a collect and an adjoint-vector product for every one of them.
+    @inbounds for idx in 0:(total - 1)
+        spot = 0
+        for d in 1:n
+            # Bit d of idx, counting from the least significant, matches the old
+            # reverse(combination) ordering.
+            if (idx >> (d - 1)) & 1 == 1
+                spot += weights[n - d + 1]
+            end
+        end
+        invOrder[spot + 1] = idx + 1
+    end
+    return Tuple(invOrder)
 end
 
 function fast_getSubdivisionIntervals(Ms,errors,trackedInterval,exact,level;oneDimension=false)
@@ -893,34 +981,63 @@ function fast_trimMs(Ms, errors, relApproxTol=1e-3, absApproxTol=2^(-52))
         The absolute error increase allowed
     """
     dim = ndims(Ms[1])
+    buf = Vector{Float64}()
     for polyNum in 1:dim #Loop through the polynomials
         allowedErrorIncrease = absApproxTol + errors[polyNum] * relApproxTol
-        #Use slicing to look at a slice of the highest degree in the dimension we want to trim
-        slices = []
-        for i in 1:dim
-            push!(slices,:)
-        end
-        # [: for i in 1:dim] # equivalent to selecting everything
         for currDim in dim:-1:1
-            slices[currDim] = size(Ms[polyNum])[currDim] # Now look at just the last row of the current dimension's approximation
-            lastSum = sum(abs.(Ms[polyNum][slices...]))
+            # Sum the highest-degree slice along currDim. The old code built an untyped `slices`
+            # vector and splatted it, which made every index dynamic and materialized both the
+            # slice and its abs, once per iteration of the loop below.
+            lastSum = fast_absSumTopSlice(Ms[polyNum], currDim, buf)
             # Iteratively eliminate the highest degree row of the current dimension if
             # the sum of its approximation coefficients is of low error, but keep deg at least 2
             while (lastSum < allowedErrorIncrease) && (size(Ms[polyNum])[currDim] > 3)
                 # Trim the polynomial
-                slices[currDim] = 1:(slices[currDim]-1)
-                Ms[polyNum] = Ms[polyNum][slices...]
+                Ms[polyNum] = fast_dropTopSlice(Ms[polyNum], currDim)
                 # Update the remaining error increase allowed an the error of the approximation.
                 allowedErrorIncrease -= lastSum
                 errors[polyNum] += lastSum
                 # Reset for the next iteration with the next highest degree of the current dimension.
-                slices[currDim] = size(Ms[polyNum])[currDim]
-                lastSum = sum(abs.(Ms[polyNum][slices...]))
+                lastSum = fast_absSumTopSlice(Ms[polyNum], currDim, buf)
             end
-            # Reset to select all of the current dimension when looking at the next dimension.
-            slices[currDim] = 1:size(Ms[polyNum])[currDim]
         end
     end
+end
+
+"""Sum of |M| over the highest-degree slice along dimension `d`.
+
+Gathers the slice into a dense buffer and reduces that, rather than reducing a strided view:
+a view reduces in a different order and so would not agree to the last bit with the
+`sum(abs.(M[slice...]))` this replaces. Compared to that expression this still saves the second
+full-size temporary (the `abs.`), and the buffer is reused across the trimming loop."""
+function fast_absSumTopSlice(M::AbstractArray{Float64}, d::Int,
+                             buf::Vector{Float64} = Vector{Float64}())
+    before = 1
+    @inbounds for k in 1:d-1
+        before *= size(M, k)
+    end
+    n_d = size(M, d)
+    after = 1
+    @inbounds for k in d+1:ndims(M)
+        after *= size(M, k)
+    end
+    n = before * after
+    resize!(buf, n)          # keeps the capacity it already grew to
+    period = before * n_d
+    off = (n_d - 1) * before
+    p = 0
+    @inbounds for j in 0:after-1, i in 1:before
+        buf[p += 1] = M[off + i + j * period]
+    end
+    return sum(abs, buf)
+end
+
+"""Copy of M with the highest-degree slice along dimension `d` removed."""
+function fast_dropTopSlice(M::AbstractArray{Float64,N}, d::Int) where {N}
+    # A homogeneous NTuple{N,UnitRange{Int}}: mixing UnitRange and OneTo here would make the
+    # index tuple heterogeneous and box it.
+    idx = ntuple(k -> 1:(k == d ? size(M, d) - 1 : size(M, k)), Val(N))
+    return M[idx...]
 end
 
 function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
@@ -962,9 +1079,15 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     #If the absolute value of the constant term for any of the chebyshev polynomials is greater than the sum of the
     #absoulte values of any of the other terms, it will return that there are no zeros on that interval
     if solverOptions.constant_check
-        consts = [M[1] for M in Ms]
-        err = [sum(abs.(M))-abs(c)+e for (M,e,c) in zip(Ms,errors,consts)]
-        if any(abs.(consts) .> err)
+        tooBig = false
+        @inbounds for i in eachindex(Ms)
+            c = Ms[i][1]
+            if abs(c) > sum(abs, Ms[i]) - abs(c) + errors[i]
+                tooBig = true
+                break
+            end
+        end
+        if tooBig
             return [], []
         end
     end
