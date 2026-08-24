@@ -34,6 +34,10 @@ function twoProd(a,b)
     return x,y
 end
 
+# Scalar forms of the three routines above. The array versions broadcast, which allocates half a
+# dozen temporaries per call; the transform replay in TrackedInterval calls them once per saved
+# transform per root, so the temporaries dominated there. Element for element these compute
+# exactly the same floating point operations as the broadcasts.
 # TODO: import from a library instead
 function TwoProdWithSplit(a,b,a1,a2)
     """Returns x,y such that a*b = x+y exactly and a*b = x in floating point but with a already split."""
@@ -65,16 +69,19 @@ function getLinearTerms(M)
     A: array
         An array with the linear terms of M
     """
-    A = []
+    # Index the tensor directly rather than building an untyped list: `A = []` gave a Vector{Any},
+    # which forced every caller to convert, and boxed each coefficient on the way in.
+    N = ndims(M)
+    T = eltype(M)
+    A = Vector{T}(undef, N)
     spot = 1
-    newM = reshape(M,(1,length(M)))
-    
-    for i in size(M)
-        push!(A, (i) == 1 ? 0 : newM[spot+1])
-        spot *= (i)
+    @inbounds for d in 1:N
+        s = size(M, d)
+        # Fill from the back so the result is already in dimension order (the old code reversed).
+        A[N - d + 1] = s == 1 ? zero(T) : M[spot + 1]
+        spot *= s
     end
-
-    return reverse(A) # Return linear terms in dimension order.
+    return A
 end
 
 function linearCheck1(totalErrs,A,consts)
@@ -390,7 +397,7 @@ function getTransformationError(M,dim)
     """
 
     machEps = type(2)^-(precision-1)
-    error = reverse(size(M))[dim] * machEps * sum(abs.(M))
+    error = size(M, ndims(M) - dim + 1) * machEps * sum(abs, M)
     return error #TODO: Figure out a more rigurous bound!
 end
 
@@ -508,7 +515,9 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
     #Get the Vector of the constant terms
     consts = [M[1] for M in Ms]'
     #Get the Error of everything else combined.
-    totalErrs = [sum(abs.(Ms[i])) + errors[i] for i = 1:dim]'
+    # sum(abs, M) rather than sum(abs.(M)): the latter materialized a full copy of every
+    # coefficient tensor on every interval.
+    totalErrs = [sum(abs, Ms[i]) + errors[i] for i = 1:dim]'
     linear_sums = sum(abs.(A),dims=1)
     err = totalErrs - abs.(consts) - linear_sums
 
@@ -559,8 +568,10 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
             width = abs.(Ainv)*err'
             a1 = center-width
             b1 = center + width
-            a = mapslices(x->maximum(x),hcat(a0,a1),dims = 2)
-            b = mapslices(x->minimum(x),hcat(b0,b1),dims = 2)
+            # Elementwise max/min of two columns; mapslices over an hcat allocated the stacked
+            # matrix, a view per row and a wrapper per result.
+            a = max.(a0, a1)
+            b = min.(b0, b1)
         else
             a = a0
             b = b0
@@ -698,7 +709,7 @@ function getSubdivisionDims(Ms,trackedInterval,level)
     """
     dim = length(Ms)
     dims_to_consider = collect(1:dim)
-    new_dims = []
+    new_dims = Int[]
     for i in 1:dim
         if !isapprox(trackedInterval.interval[1,i], trackedInterval.interval[2,i],rtol=1e-5,atol=1e-8) || (i == dim && length(new_dims) == 0)
             push!(new_dims,dims_to_consider[i])
@@ -760,17 +771,30 @@ function getInverseOrder(order)
         matrices resulting from the subdivision as if the original matrix had been subdivided in
         numerical order
     """
-    t = ones(length(order))
-    t[sortperm(order)] = collect(0:length(t)-1)
-    order = t
-    len = length(order)-1
-    order = Int.([2^(len-x) for x in order])
-    combinations = Iterators.product(fill([0,1],len+1)...)
-    newOrder_matrix = [collect(reverse(i))'*order for i in combinations]
-    newOrder = reshape(newOrder_matrix,(1,length(newOrder_matrix)))
-    invOrder = ones(length(newOrder))
-    invOrder[newOrder .+ 1] = collect(1:length(newOrder))
-    return Tuple(Int.(invOrder))
+    n = length(order)
+    # Rank of each entry of `order`; the old code round-tripped this through Float64 and then
+    # back through Int.
+    weights = Vector{Int}(undef, n)
+    perm = sortperm(order)
+    @inbounds for (rank, pos) in enumerate(perm)
+        weights[pos] = 1 << (n - rank)
+    end
+    total = 1 << n
+    invOrder = Vector{Int}(undef, total)
+    # Enumerate the 2^n sign patterns directly rather than through Iterators.product plus a
+    # reverse, a collect and an adjoint-vector product for every one of them.
+    @inbounds for idx in 0:(total - 1)
+        spot = 0
+        for d in 1:n
+            # Bit d of idx, counting from the least significant, matches the old
+            # reverse(combination) ordering.
+            if (idx >> (d - 1)) & 1 == 1
+                spot += weights[n - d + 1]
+            end
+        end
+        invOrder[spot + 1] = idx + 1
+    end
+    return Tuple(invOrder)
 end
 
 function getSubdivisionIntervals(Ms,errors,trackedInterval,exact,level;oneDimension=false)
@@ -892,34 +916,69 @@ function trimMs(Ms, errors, relApproxTol=type(1e-3), absApproxTol=type(2)^-(prec
         The absolute error increase allowed
     """
     dim = ndims(Ms[1])
+    buf = eltype(Ms[1])[]
     for polyNum in 1:dim #Loop through the polynomials
         allowedErrorIncrease = absApproxTol + errors[polyNum] * relApproxTol
-        #Use slicing to look at a slice of the highest degree in the dimension we want to trim
-        slices = []
-        for i in 1:dim
-            push!(slices,:)
-        end
-        # [: for i in 1:dim] # equivalent to selecting everything
         for currDim in dim:-1:1
-            slices[currDim] = size(Ms[polyNum])[currDim] # Now look at just the last row of the current dimension's approximation
-            lastSum = sum(abs.(Ms[polyNum][slices...]))
+            # Count how many of the highest-degree slices along currDim can go, then copy once.
+            # Trimming one slice at a time copied the whole tensor per slice removed, and the old
+            # code additionally built an untyped `slices` vector and splatted it, which made every
+            # index dynamic and materialized both the slice and its abs on each pass.
+            #
+            # A trimmed tensor is a prefix of the untrimmed one along currDim, so slice j holds
+            # the same values in the same order either way and can be summed off the original.
+            M = Ms[polyNum]
+            size_d = size(M, currDim)
+            kept = size_d
+            lastSum = absSumSliceAt(M, currDim, kept, buf)
             # Iteratively eliminate the highest degree row of the current dimension if
             # the sum of its approximation coefficients is of low error, but keep deg at least 2
-            while (lastSum < allowedErrorIncrease) && (size(Ms[polyNum])[currDim] > 3)
-                # Trim the polynomial
-                slices[currDim] = 1:(slices[currDim]-1)
-                Ms[polyNum] = Ms[polyNum][slices...]
+            while (lastSum < allowedErrorIncrease) && (kept > 3)
                 # Update the remaining error increase allowed an the error of the approximation.
                 allowedErrorIncrease -= lastSum
                 errors[polyNum] += lastSum
                 # Reset for the next iteration with the next highest degree of the current dimension.
-                slices[currDim] = size(Ms[polyNum])[currDim]
-                lastSum = sum(abs.(Ms[polyNum][slices...]))
+                kept -= 1
+                lastSum = absSumSliceAt(M, currDim, kept, buf)
             end
-            # Reset to select all of the current dimension when looking at the next dimension.
-            slices[currDim] = 1:size(Ms[polyNum])[currDim]
+            if kept < size_d
+                Ms[polyNum] = keepFirst(M, currDim, kept)
+            end
         end
     end
+end
+
+"""Sum of |M| over slice `j` along dimension `d`.
+
+Gathers the slice into a dense buffer and reduces that, rather than reducing a strided view:
+a view reduces in a different order and so would not agree to the last bit with the
+`sum(abs.(M[slice...]))` this replaces. The buffer is reused across the trimming loop."""
+function absSumSliceAt(M::AbstractArray{T}, d::Int, j::Int, buf::Vector{T} = T[]) where {T}
+    before = 1
+    @inbounds for k in 1:d-1
+        before *= size(M, k)
+    end
+    after = 1
+    @inbounds for k in d+1:ndims(M)
+        after *= size(M, k)
+    end
+    n = before * after
+    resize!(buf, n)          # keeps the capacity it already grew to
+    period = before * size(M, d)
+    off = (j - 1) * before
+    p = 0
+    @inbounds for c in 0:after-1, i in 1:before
+        buf[p += 1] = M[off + i + c * period]
+    end
+    return sum(abs, buf)
+end
+
+"""Copy of M keeping only the first `kept` slices along dimension `d`."""
+function keepFirst(M::AbstractArray{T,N}, d::Int, kept::Int) where {T,N}
+    # A homogeneous NTuple{N,UnitRange{Int}}: mixing UnitRange and OneTo here would make the
+    # index tuple heterogeneous and box it.
+    idx = ntuple(k -> 1:(k == d ? kept : size(M, k)), Val(N))
+    return M[idx...]
 end
 
 function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
@@ -962,7 +1021,7 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     #absoulte values of any of the other terms, it will return that there are no zeros on that interval
     if solverOptions.constant_check
         consts = [M[1] for M in Ms]
-        err = [sum(abs.(M))-abs(c)+e for (M,e,c) in zip(Ms,errors,consts)]
+        err = [sum(abs, M)-abs(c)+e for (M,e,c) in zip(Ms,errors,consts)]
         if any(abs.(consts) .> err)
             return [], []
         end

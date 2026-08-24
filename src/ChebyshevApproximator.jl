@@ -317,6 +317,25 @@ function dct(cheb_zeros)
     return coeffs
 end
 
+"""Evaluates f at every point of the Chebyshev grid.
+
+`pts` holds one coordinate array per dimension and `shape` is the shape of the value tensor,
+which is the per-dimension degrees reversed (the array layout the rest of this file uses).
+"""
+function evaluateGrid(f, pts, shape::NTuple{N,Int}) where {N}
+    values = Array{Float64,N}(undef, shape)
+    ptsN = ntuple(d -> pts[d]::Vector{Float64}, Val(N))
+    @inbounds for J in CartesianIndices(values)
+        values[J] = f(gridPoint(ptsN, J)...)
+    end
+    return values
+end
+
+"""The coordinates of grid point `J`, in dimension order."""
+@generated function gridPoint(pts::NTuple{N,Vector{Float64}}, J::CartesianIndex{N}) where {N}
+    return Expr(:tuple, [:(@inbounds pts[$d][J.I[$(N - d + 1)]]) for d in 1:N]...)
+end
+
 function intervalApproximateND(f, degs, a, b, retSupNorm = false)
     """Generates an approximation of f on [a,b] using Chebyshev polynomials of degs degrees.
 
@@ -348,11 +367,20 @@ function intervalApproximateND(f, degs, a, b, retSupNorm = false)
     originalDegs = copy(degs)
     degs[degs .== 0] .= 1 
 
-    # Get the Chebyshev Grid Points
-    cheb_grid = createMeshgrid([transformPoints(cos.(collect(0:deg)*(pi/deg)), a_,b_) 
-                                    for (deg, a_, b_) in zip(degs, a, b)]...)
-    cheb_pts = reshape(vcat(map(x -> reshape(x,(1,length(x))),cheb_grid)...),(dim,:))
-    values = reshape(mapslices(x->f(x...),cheb_pts,dims=1),Tuple(reverse(degs.+1)))
+    # Get the Chebyshev Grid Points, one coordinate array per dimension.
+    #
+    # These used to be expanded into a full meshgrid -- `dim` arrays each the size of the whole
+    # grid -- then concatenated and reshaped into a dim x npoints matrix, which f was applied to
+    # with `mapslices`. The grid holds one point per coefficient of the approximation, so past a
+    # low degree in two dimensions that is thousands of points, and mapslices evaluates them
+    # through an untyped path that allocates a slice and a result wrapper per point.
+    #
+    # The coordinate arrays alone are enough: grid point J takes its d-th coordinate from
+    # pts[d][J[N-d+1]], which is what the meshgrid held at that position anyway. Same points in
+    # the same order, so f sees exactly what it saw before.
+    pts = [transformPoints(cos.(collect(0:deg)*(pi/deg)), a_, b_)
+           for (deg, a_, b_) in zip(degs, a, b)]
+    values = evaluateGrid(f, pts, Tuple(reverse(degs .+ 1)))
     #Get the supNorm if we want it
     if retSupNorm
         supNorm = maximum(abs.(values))
