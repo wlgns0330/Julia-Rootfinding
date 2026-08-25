@@ -103,6 +103,8 @@ function fast_addTransform(trackedInterval::FastTrackedInterval, subInterval)
     push!(trackedInterval.transforms, transform)
     #Update the lower and upper bounds of the current interval
     @inbounds for d in 1:n
+        # alpha2/beta2 come from the bounds as they were before this dimension was touched,
+        # matching the row copies the previous code took before its update loop.
         a2 = iv[1, d]
         b2 = iv[2, d]
         alpha2 = (b2 - a2) / 2.
@@ -110,10 +112,14 @@ function fast_addTransform(trackedInterval::FastTrackedInterval, subInterval)
         for i in 1:2
             x = subInterval[i, d]
             #Be exact if x = +-1
+            # These two read the bound live, not the pre-loop copy: when subInterval's rows are
+            # out of order in this dimension -- which happens, since the degeneracy test above is
+            # a lexicographic row comparison rather than a per-dimension one -- writing row 1
+            # first and then hitting x == -1 on row 2 is meant to pick up the value just written.
             if x == -1.0
-                iv[i, d] = a2
+                iv[i, d] = iv[1, d]
             elseif x == 1.0
-                iv[i, d] = b2
+                iv[i, d] = iv[2, d]
             else
                 iv[i, d] = alpha2 * x + beta2
             end

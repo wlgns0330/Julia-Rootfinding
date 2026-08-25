@@ -627,7 +627,12 @@ function fast_boundingIntervalLinearSystem(Ms, errors, finalStep)
         #Now do the linear solve check
         #We use the matrix inverse to find the width, so might as well use it both spots. Should be fine as dim is small.
         if wellConditioned #Make sure conditioning is ok.
-            width = absAinv * err
+            # `err` is reshaped to a column on purpose. The original built it by broadcasting
+            # against `sum(abs.(A), dims=1)`, so it was a 1 x dim matrix and `err'` made this a
+            # matrix-matrix product. Passing a plain vector makes it a matrix-vector product
+            # instead, and BLAS's two kernels do not agree to the last bit -- enough to move a
+            # root, since these bounds steer the search.
+            width = absAinv * reshape(err, :, 1)
             a = max.(a0, center .- width)
             b = min.(b0, center .+ width)
         else
