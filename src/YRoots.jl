@@ -1,5 +1,7 @@
 module YRoots
 
+using PrecompileTools
+
 include("CombinedSolver.jl")
 
 export solve
@@ -15,9 +17,15 @@ export solve
 # runtime value, so nothing downstream of it can be inferred from the signature alone. Measured, a
 # declaration alone still leaves 8-10s on each first solve.
 #
-# Each dimension costs precompile time (about 55s total for 1 through 4); raise the range to cover
-# higher dimensions.
-let
+# Covering dimensions 1 through 4 costs about 55s of precompilation. Raise the range to cover higher
+# dimensions; anyone who would rather not pay it at all can turn this block off without editing the
+# package:
+#
+#     using Preferences, YRoots
+#     set_preferences!(YRoots, "precompile_workload" => false; force=true)
+#
+# which drops precompilation back to about 4s and restores the slow first solve.
+@compile_workload begin
     for n in 1:4
         eqs = Any[(x...) -> x[i] - x[i+1] for i in 1:n-1]
         push!(eqs, (x...) -> sum(v^2 for v in x) - 0.5)
