@@ -1,28 +1,28 @@
-module YRoots #This is the main module file, for versioning and test suite compatibility
+module YRoots
 
 include("CombinedSolver.jl")
 
 export solve
 
-# Solving is specialized on the dimension of the system, so on a fresh session the first solve of
-# each dimension pays for compiling the whole solver at that dimension before it returns any
-# roots -- around 26s for the first 2-D system and another 9s for the first 3-D one, against a
-# few milliseconds for every solve after it. Running small systems here moves that compilation
-# into precompilation, where it is paid once when the package is installed (or when Julia or a
-# dependency changes) and then cached to disk for every session afterwards.
+# Compile the solver at each dimension, once at install, instead of on each session's first solve.
 #
-# Each dimension listed costs precompile time, so this covers 1-D through 3-D; a first 4-D solve
-# still compiles on demand.
+# Solving is specialized on the dimension of the system, so without this the first solve of a given
+# dimension compiles the whole solver before returning any roots -- around 26s for the first 2-D
+# system, 9s for the first 3-D and 29s for the first 4-D -- against a few milliseconds for every
+# solve after it. Running systems here moves that into precompilation, which Julia caches to disk.
+#
+# A `precompile(solve, ...)` declaration is not enough: the dimension comes from `length(funcs)`, a
+# runtime value, so nothing downstream of it can be inferred from the signature alone. Measured, a
+# declaration alone still leaves 8-10s on each first solve.
+#
+# Each dimension costs precompile time (about 55s total for 1 through 4); raise the range to cover
+# higher dimensions.
 let
-    solve(Any[x -> x^2 - 0.25], [-1.0], [1.0])
-    solve(Any[(x, y) -> x^2 + y^2 - 0.5, (x, y) -> x - y], [-1.0, -1.0], [1.0, 1.0])
-    solve(Any[(x, y, z) -> x^2 + y^2 - 0.5,
-              (x, y, z) -> x - y,
-              (x, y, z) -> z - 0.25], [-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])
-    solve(Any[(w, x, y, z) -> w^2 + x^2 - 0.5,
-              (w, x, y, z) -> w - x,
-              (w, x, y, z) -> y - 0.25,
-              (w, x, y, z) -> z + 0.25], [-1.0, -1.0, -1.0, -1.0], [1.0, 1.0, 1.0, 1.0])
+    for n in 1:4
+        eqs = Any[(x...) -> x[i] - x[i+1] for i in 1:n-1]
+        push!(eqs, (x...) -> sum(v^2 for v in x) - 0.5)
+        solve(eqs, fill(-1.0, n), fill(1.0, n))
+    end
 end
 
 end # module YRoots
