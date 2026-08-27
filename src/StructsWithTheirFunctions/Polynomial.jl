@@ -28,13 +28,27 @@ struct MultiPower
     end
 end
 
+"""Puts a Chebyshev coefficient array into the layout the solver works in.
+
+The solver reads axis k of a coefficient tensor as variable `ndims - k + 1` -- the reverse of the
+`coeff[i,j,...]` <-> `T_i(x) T_j(y) ...` convention a caller writes, and that Python yroots uses.
+
+MultiPower reaches that layout by a longer route: `to_julia` followed by the final `permutedims`
+inside `multipower_to_cheb`, which compose to exactly this reversal (checked in 2 through 6
+dimensions). MultiCheb has no basis conversion to ride along with, and `to_julia` alone does not
+get there, so it reverses directly.
+
+Before this MultiCheb did neither, and was solved transposed -- silently, and only relative to
+MultiPower, so a system mixing the two solved one polynomial against the other's transpose."""
+to_solver_layout(A) = ndims(A) < 2 ? A : permutedims(A, ndims(A):-1:1)
+
 struct MultiCheb
     """Contains the coeffs array for a MultiCheb object"""
     coeff
     dim
 
     function MultiCheb(coeff; clean_zeros=true)
-        c = to_julia(coeff)
+        c = to_solver_layout(coeff)
         if clean_zeros
             c = clean_coeff(c)
         end
