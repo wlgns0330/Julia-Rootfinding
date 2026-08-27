@@ -189,6 +189,10 @@ function multipower_to_cheb(coeffs)
         # Go through each dimension and transform
         cheb_coeffs = to_chebND(cheb_coeffs,dim)
     end
+    # A univariate polynomial has no axes to swap, and permutedims rejects [2,1] on a vector.
+    # (The swap is one half of the reversal into the solver's layout; the other half is in
+    # `to_julia`. Both are the identity in one dimension.)
+    ndims(coeffs) < 2 && return cheb_coeffs
     final_order = append!([2,1],collect(3:ndims(coeffs)))
     return permutedims(cheb_coeffs,final_order)
 end

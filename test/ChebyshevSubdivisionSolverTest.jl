@@ -1213,7 +1213,7 @@ function test_getSubdivisionDims()
         expected_allDims_1 = [1; 3; 2;;
                                         2; 1; 3;;
                                         3; 2; 1]
-        @test isapprox(expected_allDims_1, getSubdivisionDims(Ms_1,trackedInterval_1,level_1))
+        @test isapprox(expected_allDims_1, reduce(hcat, getSubdivisionDims(Ms_1,trackedInterval_1,level_1)))
 
         trackedInterval_2 = TrackedInterval([ 0.1110769;   0.11932933;;
                                                         -1.;         -0.99371914;;
@@ -1223,7 +1223,7 @@ function test_getSubdivisionDims()
         expected_allDims_2 = [1; 3; 2;;
                                         2; 1; 3;;
                                         3; 2; 1]
-        @test isapprox(expected_allDims_2, getSubdivisionDims(Ms_2,trackedInterval_2,level_2))
+        @test isapprox(expected_allDims_2, reduce(hcat, getSubdivisionDims(Ms_2,trackedInterval_2,level_2)))
 
         trackedInterval_3 = TrackedInterval([ 0.08600977;  0.1526489 ;;
                                                         -1.;         -1+1e-5;;
@@ -1233,7 +1233,7 @@ function test_getSubdivisionDims()
         expected_allDims_3 = [1; 3;;
                                         1; 3;;
                                         3; 1]
-        @test isapprox(expected_allDims_3, getSubdivisionDims(Ms_3,trackedInterval_3,level_3))
+        @test isapprox(expected_allDims_3, reduce(hcat, getSubdivisionDims(Ms_3,trackedInterval_3,level_3)))
 
         trackedInterval_3a = TrackedInterval([ 0.08600977;  0.1526489 ;;
                                                         -1.;         -.9;;
@@ -1243,7 +1243,7 @@ function test_getSubdivisionDims()
         expected_allDims_3a = [1; 3; 2;;
                                         2; 1; 3;;
                                         3; 2; 1]
-        @test isapprox(expected_allDims_3a, getSubdivisionDims(Ms_3a,trackedInterval_3a,level_3a))
+        @test isapprox(expected_allDims_3a, reduce(hcat, getSubdivisionDims(Ms_3a,trackedInterval_3a,level_3a)))
 
         trackedInterval_3b = TrackedInterval([ 0.08600977;  0.1526489 ;;
                                                             -1.;        -1+1e-5;;
@@ -1253,7 +1253,7 @@ function test_getSubdivisionDims()
         expected_allDims_3b = [1; 3;;
                                 1; 3;;
                                 3; 1]
-        @test isapprox(expected_allDims_3b, getSubdivisionDims(Ms_3b,trackedInterval_3b,level_3b))
+        @test isapprox(expected_allDims_3b, reduce(hcat, getSubdivisionDims(Ms_3b,trackedInterval_3b,level_3b)))
 
         trackedInterval_4 = TrackedInterval([1.;  1.])
         Ms_4 = [[ 1.98388230e-01; -7.45867440e-02;  4.04311356e-01;  5.88271449e-01;
@@ -1266,7 +1266,7 @@ function test_getSubdivisionDims()
                             4.28823643e-15;  1.47104551e-15]]
         level_4 = 1
         expected_allDims_4 = [1;;]
-        @test isapprox(expected_allDims_4, getSubdivisionDims(Ms_4,trackedInterval_4,level_4))
+        @test isapprox(expected_allDims_4, reduce(hcat, getSubdivisionDims(Ms_4,trackedInterval_4,level_4)))
 
         trackedInterval_5 = TrackedInterval([-1.;         -0.48027223])
         Ms_5 = [[ 6.69963798e-01;  2.18239042e-01; -1.22498853; -3.73956662e-02;
@@ -1276,7 +1276,7 @@ function test_getSubdivisionDims()
                             3.54786084e-14;  1.76079511e-16; -9.46841952e-17]]
         level_5 = 3
         expected_allDims_5 = [1;;]
-        @test isapprox(expected_allDims_5, getSubdivisionDims(Ms_5,trackedInterval_5,level_5))
+        @test isapprox(expected_allDims_5, reduce(hcat, getSubdivisionDims(Ms_5,trackedInterval_5,level_5)))
 
         trackedInterval_6 = TrackedInterval([-1.;         1.;;
                                                         -1.;         1.;;
@@ -1290,7 +1290,7 @@ function test_getSubdivisionDims()
                                         5; 4; 3; 2; 1;;
                                         4; 3; 2; 1; 5;;
                                         5; 3; 2; 1; 4]
-        @test isapprox(expected_allDims_6, getSubdivisionDims(Ms_6,trackedInterval_6,level_6))
+        @test isapprox(expected_allDims_6, reduce(hcat, getSubdivisionDims(Ms_6,trackedInterval_6,level_6)))
 
         trackedInterval_7 = TrackedInterval([ 0.03945555;  1.;;
                                                 -1.;          0.03945555;;
@@ -1304,7 +1304,7 @@ function test_getSubdivisionDims()
                                         5; 4; 3; 2; 1;;
                                         4; 3; 2; 1; 5;;
                                         5; 3; 2; 1; 4]
-        @test isapprox(expected_allDims_7, getSubdivisionDims(Ms_7,trackedInterval_7,level_7))
+        @test isapprox(expected_allDims_7, reduce(hcat, getSubdivisionDims(Ms_7,trackedInterval_7,level_7)))
 
         trackedInterval_8 = TrackedInterval([ 0.03945555;  1.        ;;
                                 -1.;          0.03945555;;
@@ -1318,7 +1318,7 @@ function test_getSubdivisionDims()
                                         5; 4; 3; 2; 1;;
                                         4; 3; 2; 1; 5;;
                                         5; 3; 2; 1; 4]
-        @test isapprox(expected_allDims_8, getSubdivisionDims(Ms_8,trackedInterval_8,level_8))
+        @test isapprox(expected_allDims_8, reduce(hcat, getSubdivisionDims(Ms_8,trackedInterval_8,level_8)))
 
         trackedInterval_9 = TrackedInterval([-1.;  1.])
         Ms_9 = [[ 1.98388230e-01; -7.45867440e-02;  4.04311356e-01;  5.88271449e-01;
@@ -1331,7 +1331,7 @@ function test_getSubdivisionDims()
                             4.28823643e-15;  1.47104551e-15]]
         level_9 = 5
         expected_allDims_9 = [1;;]
-        @test isapprox(expected_allDims_9, getSubdivisionDims(Ms_9,trackedInterval_9,level_9))
+        @test isapprox(expected_allDims_9, reduce(hcat, getSubdivisionDims(Ms_9,trackedInterval_9,level_9)))
 
         trackedInterval_10 = TrackedInterval([-1.;  1.])
         Ms_10 = [[ 1.98388230e-01; -7.45867440e-02;  4.04311356e-01;  5.88271449e-01;
@@ -1344,7 +1344,7 @@ function test_getSubdivisionDims()
                             4.28823643e-15;  1.47104551e-15]]
         level_10 = 6
         expected_allDims_10 = [1;;]
-        @test isapprox(expected_allDims_10, getSubdivisionDims(Ms_10,trackedInterval_10,level_10))
+        @test isapprox(expected_allDims_10, reduce(hcat, getSubdivisionDims(Ms_10,trackedInterval_10,level_10)))
 
         trackedInterval_11 = TrackedInterval([ 0.03945555;  0.03945555 + 1e-5;;
                                                 -1.;          1;;
@@ -1358,7 +1358,7 @@ function test_getSubdivisionDims()
                                 2;;
                                 2;;
                                 2]
-        @test isapprox(expected_allDims_11, getSubdivisionDims(Ms_11,trackedInterval_11,level_11))
+        @test isapprox(expected_allDims_11, reduce(hcat, getSubdivisionDims(Ms_11,trackedInterval_11,level_11)))
 
         trackedInterval_12 = TrackedInterval([ 0.03945555;  0.03945555 + 1e-5;;
                                                 -1.;          -1 + 1e-5;;
@@ -1372,7 +1372,7 @@ function test_getSubdivisionDims()
                                 5; 4; 1;;
                                 4; 1; 5;;
                                 5; 1; 4]
-        @test isapprox(expected_allDims_12, getSubdivisionDims(Ms_12,trackedInterval_12,level_12))
+        @test isapprox(expected_allDims_12, reduce(hcat, getSubdivisionDims(Ms_12,trackedInterval_12,level_12)))
 
         trackedInterval_13 = TrackedInterval([1;1 + 1e-5;;
                                                 1;10;;
@@ -1384,7 +1384,7 @@ function test_getSubdivisionDims()
                                 2;;
                                 2;;
                                 2]
-        @test isapprox(expected_allDims_13, getSubdivisionDims(Ms_13,trackedInterval_13,level_13))
+        @test isapprox(expected_allDims_13, reduce(hcat, getSubdivisionDims(Ms_13,trackedInterval_13,level_13)))
     
         trackedInterval_14 = TrackedInterval([1;5;;
                                                 1;10;;
@@ -1396,7 +1396,7 @@ function test_getSubdivisionDims()
                                 2; 1;;
                                 2; 1;;
                                 2; 1]
-        @test isapprox(expected_allDims_14, getSubdivisionDims(Ms_14,trackedInterval_14,level_14))
+        @test isapprox(expected_allDims_14, reduce(hcat, getSubdivisionDims(Ms_14,trackedInterval_14,level_14)))
 
         trackedInterval_15 = TrackedInterval([1;5;;
                                                 1;10;;
@@ -1408,7 +1408,7 @@ function test_getSubdivisionDims()
                                 1;;
                                 1;;
                                 1]
-        @test isapprox(expected_allDims_15, getSubdivisionDims(Ms_15,trackedInterval_15,level_15))
+        @test isapprox(expected_allDims_15, reduce(hcat, getSubdivisionDims(Ms_15,trackedInterval_15,level_15)))
     end
 end
 
