@@ -13,7 +13,10 @@ function test_construction()
 
         MC = MultiCheb(arr1)
         @test typeof(MC) == MultiCheb
-        @test isapprox(MC.coeff,arr1)
+        # MultiCheb reverses the axes on the way in, to the layout the solver reads. This used to
+        # assert the array came back untouched, which is precisely the bug that made a MultiCheb
+        # solve as its own transpose.
+        @test isapprox(MC.coeff, permutedims(arr1, ndims(arr1):-1:1))
 
         MP_1 = MultiPower(arr1)
         @test typeof(MP_1) == MultiPower

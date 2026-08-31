@@ -33,7 +33,7 @@ function quadraticCheck2D(test_coeff,tol)
         c[6] = test_coeff[3,1]
     end
 
-    other_sum = sum(abs.(test_coeff)) - sum(abs.(c)) + tol
+    other_sum = sum(abs, test_coeff) - sum(abs.(c)) + tol
     k0 = c[1]-c[4]-c[6]
     k3 = 2*c[4]
     k5 = 2*c[6]
@@ -206,7 +206,7 @@ function quadraticCheck3D(test_coeff,tol)
     end
 
     #The sum of the absolute values of everything else
-    other_sum = sum(abs.(test_coeff)) - sum(abs.(c)) + tol
+    other_sum = sum(abs, test_coeff) - sum(abs.(c)) + tol
 
     #function for evaluating c0 + c1x + c2y +c3z + c4xy + c5xz + c6yz + c7T_2(x) + c8T_2(y) + c9T_2(z)
     # Use the Horner form because it is much faster, also do any repeated computatons in advance
@@ -633,7 +633,7 @@ function quadraticCheckND(test_coeff, tol)
     end
 
     #The sum of the absolute values of everything else
-    other_sum = sum(abs.(test_coeff)) .+ tol
+    other_sum = sum(abs, test_coeff) .+ tol
 
     #iterator for sides
     fixed_vars = get_fixed_vars(dim)
