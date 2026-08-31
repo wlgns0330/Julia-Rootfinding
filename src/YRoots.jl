@@ -4,7 +4,7 @@ using PrecompileTools
 
 include("CombinedSolver.jl")
 
-export solve, MultiPower, MultiCheb, eval_MultiPower
+export solve, MultiPower, MultiCheb, eval_MultiPower, eval_MultiCheb
 
 # Compile the solver at each dimension, once at install, instead of on each session's first solve.
 #

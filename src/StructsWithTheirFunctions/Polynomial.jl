@@ -124,6 +124,61 @@ function eval_MultiPower(multiPower,points)
 
 end
 
+function eval_MultiCheb(multiCheb,points)
+    """ Evaluates a MultiCheb at one or many points.
+
+        Unlike `eval_MultiPower` there is no permutedims here. `MultiPower.coeff` is stored
+        in `to_julia`'s layout and has to be un-swapped before evaluating; `MultiCheb.coeff`
+        is already the plain reversal (`to_solver_layout`), which is exactly the layout the
+        loop below wants -- axis k of the tensor is variable dim - k + 1, so the axes fall
+        off the end in variable order 1, 2, ... """
+    function chebval(x, cc)
+        cc = collect(eachslice(cc,dims=ndims(cc)))
+        len = length(cc)
+        if len == 1
+            c0 = cc[1]
+            c1 = zero(eltype(c0))
+        elseif len == 2
+            c0 = cc[1]
+            c1 = cc[2]
+        else
+            x2 = 2 .* x
+            c0 = cc[end-1]
+            c1 = cc[end]
+            for i in 3:len
+                tmp = c0
+                c0 = cc[end-i+1] .- c1
+                c1 = tmp .+ c1 .* x2
+            end
+        end
+        return c0 .+ c1 .* x
+    end
+
+    if ndims(points) == 1
+        if multiCheb.dim > 1
+            points = reshape(points,(size(points)[end],1))
+        else
+            points = reshape(points,(1,size(points)[end]))
+        end
+    end
+
+    if size(points)[end-1] != multiCheb.dim
+        throw(DimensionMismatch("points has $(size(points)[end-1]) rows but the polynomial is in $(multiCheb.dim) variables"))
+    end
+
+    n = multiCheb.dim
+    c = reshape(multiCheb.coeff,(ntuple(i->1, ndims(points))..., size(multiCheb.coeff)...))
+    for i in 1:n
+        c = chebval(points[i,:],c)
+    end
+    if length(c) == 1
+        return c[1]
+    else
+        return vec(c)
+    end
+
+end
+
 function multipower_to_cheb(coeffs)
     """ Takes in a multipower coefficient matrix
         Returns the chebyshev coefficient matrix """
