@@ -26,7 +26,7 @@ export solve, MultiPower, MultiCheb, eval_MultiPower
 #
 # which drops precompilation back to about 4s and restores the slow first solve.
 @compile_workload begin
-    for n in 1:4
+    for n in 1:10
         eqs = Any[(x...) -> x[i] - x[i+1] for i in 1:n-1]
         push!(eqs, (x...) -> sum(v^2 for v in x) - 0.5)
         solve(eqs, fill(-1.0, n), fill(1.0, n))
