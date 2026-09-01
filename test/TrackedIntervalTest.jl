@@ -1,8 +1,23 @@
-include("../../Julia-Rootfinding/src/StructsWithTheirFunctions/TrackedInterval.jl")
+# TrackedInterval.jl does not stand alone: getFinalInterval calls twoProd, which lives in
+# ChebyshevSubdivisionSolver.jl. Including the solver pulls in TrackedInterval.jl itself
+# (and SolverOptions.jl and QuadraticCheck.jl) transitively, so this covers both.
+include("../../Julia-Rootfinding/src/ChebyshevSubdivisionSolver.jl")
 using Test
 
+# TrackedInterval.jl reads two globals that solve() normally sets on the way in
+# (CombinedSolver.jl sets `type` and `precision` from its `roundoff` argument). Nothing
+# in this file goes through solve(), so they are set here. Without them the constructor
+# throws UndefVarError on `type` at TrackedInterval.jl:53 and every test in this file
+# errors -- which is what happened whenever this suite ran before
+# ChebyshevSubdivisionSolverTest.jl, the only other file that sets them.
+function setupTrackedIntervalGlobals()
+    global type = Float64
+    global precision = 53
+end
+
 function test_all_TrackedInterval()
-    println("All tests in TrackedIntervalTest.jl\tbegin...")
+    @testset "All tests in TrackedIntervalTest.jl" begin
+        setupTrackedIntervalGlobals()
         test_copyInterval()
         test_addTransform()
         test_getIntervalForCombining()
@@ -12,10 +27,7 @@ function test_all_TrackedInterval()
         test_contains()
         test_overlapsWith()
         test_startFinalStep()
-        test_getFinalInterval()
-        test_getFinalPoint()
-        test_overlapsWith()
-        test_startFinalStep()
+    end
 end
 
 function test_copyInterval()

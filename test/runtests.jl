@@ -14,12 +14,20 @@ include("QuadraticCheckTest.jl")
 include("../../Julia-Rootfinding/src/StructsWithTheirFunctions/TrackedInterval.jl")
 include("../../Julia-Rootfinding/src/StructsWithTheirFunctions/SolverOptions.jl")
 include("PolynomialTests.jl")
+include("SolveApiTest.jl")
+
+# Each suite runs inside one outer testset so that a failure in one does not abort the
+# rest -- an inner testset that fails records the failure and the run continues, where
+# calling them bare let the first failing suite hide every suite after it.
 function test_all()
-    test_all_ChebyshevApproximator()
-    test_all_ChebyshevSubdivisionSolver()
-    test_all_TrackedInterval()
-    test_all_QuadraticCheck()
-    test_all_Polynomial()
+    @testset "YRoots" begin
+        test_all_SolveApi()
+        test_all_ChebyshevApproximator()
+        test_all_ChebyshevSubdivisionSolver()
+        test_all_TrackedInterval()
+        test_all_QuadraticCheck()
+        test_all_Polynomial()
+    end
 end
 
 # Running this file runs the whole suite (this is what CI does).
