@@ -1,4 +1,8 @@
 using IterTools
+# quadraticCheckND uses diagind. Without this the function throws UndefVarError whenever
+# QuadraticCheck.jl is loaded on its own, and works only when something else in the
+# session has already brought LinearAlgebra into scope.
+using LinearAlgebra
 
 function get_fixed_vars(dim)
     " Returns Julia indicies of fixed vars "
