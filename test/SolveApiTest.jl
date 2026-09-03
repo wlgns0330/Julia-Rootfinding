@@ -113,27 +113,25 @@ function test_solve_illConditioned()
         # padding shrinks toward machine precision and the root can fall outside it.
         illConditioned(eps) = ((x, y) -> x + y - 0.3, (x, y) -> x + (1 + eps) * y - 0.3)
 
-        for eps in (1e-2, 1e-3, 1e-5, 1e-8)
+        # 1e-4, 1e-6 and 1e-7 used to return no roots at all here. widthToAdd was
+        # computed as max(S[end]/S[1], 2) * machEps, but S[end]/S[1] is the reciprocal
+        # condition number and never exceeds 1, so the max was always exactly 2 and the
+        # padding stayed at machine epsilon however stiff the system was.
+        #
+        # NOT covered below: eps = 1e-10, where solve() does not terminate. That is a
+        # separate, pre-existing defect -- unmodified main hangs on it identically -- and
+        # it is left out deliberately rather than asserted, because a hanging test takes
+        # CI down on a timeout instead of reporting a failure. invCondNum there is ~1e-10,
+        # right on the `wellConditioned` threshold, so the padding lands near 2e-6 and the
+        # interval can no longer shrink below it; the zoom loop keeps reporting a change
+        # and subdivides without end.
+        for eps in (1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9)
             f, g = illConditioned(eps)
             roots = YRoots.solve([f, g], [-1.0, -1.0], [1.0, 1.0])
             @test length(roots) == 1
             if length(roots) == 1
                 @test isapprox(roots[1], [0.3, 0.0], atol = 1e-6)
             end
-        end
-
-        # KNOWN FAILURE: at these three the root is not merely inaccurate, it is dropped
-        # and solve() returns nothing at all. Note this is not monotonic in the condition
-        # number -- 1e-5 and 1e-8 are stiffer than 1e-4 and both come back fine -- so it
-        # is not simply a system too ill conditioned to solve. Something in the padding is
-        # landing on the wrong side of the root for particular values.
-        #
-        # Flip these to @test when the padding is fixed; @test_broken reports an
-        # "Unexpectedly Pass" the moment it starts working, so the suite will say so.
-        for eps in (1e-4, 1e-6, 1e-7)
-            f, g = illConditioned(eps)
-            roots = YRoots.solve([f, g], [-1.0, -1.0], [1.0, 1.0])
-            @test_broken length(roots) == 1
         end
     end
 end

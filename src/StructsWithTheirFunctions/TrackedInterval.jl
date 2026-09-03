@@ -199,10 +199,13 @@ function copyInterval(trackedInterval::TrackedInterval)
     return newone
 end
 
-# Not tested or used
 function contains(trackedInterval::TrackedInterval, point)
     """Determines if point is contained in the current interval."""
-    return all(point >= trackedInterval.interval[1,:]) && all(point <= trackedInterval.interval[2,:])
+    # Elementwise, not `>=`/`<=`. Those compare vectors lexicographically in Julia, so
+    # they stop at the first differing coordinate: with x in [-1,1] and y in [-2,2],
+    # the point [0, 5] compared lexicographically is "less than" [1, 2] on its first
+    # coordinate alone and was reported as contained.
+    return all(point .>= trackedInterval.interval[1,:]) && all(point .<= trackedInterval.interval[2,:])
 end
 
 function overlapsWith(trackedInterval::TrackedInterval, otherInterval::TrackedInterval)

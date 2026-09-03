@@ -555,11 +555,23 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
     a_orig = a0
     b_orig = b0
     U,S,Vh = svd(A')
-    condNum = S[end]/S[1]
     Ainv = ((type(1) ./ S).*Vh')' * (U')
     center = -Ainv*consts'
-    wellConditioned = S[1] > 0 && condNum > 1e-10
+    # Test the reciprocal condition number rather than the condition number itself, so that
+    # a singular A gives 0 instead of a divide by zero. S[1] == 0 means A is all zeros.
+    invCondNum = S[1] > 0 ? S[end]/S[1] : type(0)
+    wellConditioned = S[1] > 0 && invCondNum > 1e-10
     machEps = type(2)^-(precision-1)
+    # Add this width to the new intervals we find to avoid rounding error throwing out roots.
+    # Solving with Ainv below loses about condNum digits, so the interval it produces has to be
+    # padded by that much. The bound from linearCheck1 is computed entrywise and only loses a
+    # couple of ulps, so when we fall back on it alone the padding stays at machine precision.
+    #
+    # This used `max(condNum, 2)` where condNum was S[end]/S[1] -- the RECIPROCAL condition
+    # number, never greater than 1, so the max was always exactly 2 and the padding never grew
+    # past machine epsilon however stiff the system was. Roots were discarded outright:
+    # x + y = 0.3 against x + (1+eps) y = 0.3 returned nothing for eps of 1e-4, 1e-6 and 1e-7.
+    condNum = wellConditioned ? type(1)/invCondNum : type(1)
     widthToAdd = max(condNum,2)*machEps
     for i = 0:1
         #Now do the linear solve check
