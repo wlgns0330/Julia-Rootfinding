@@ -1,8 +1,9 @@
 using Pkg
 using Test
 
-# Activate the project environment
-Pkg.activate(".") # MAKE SURE YOU ARE IN THE /Julia-Rootfinding folder when you run this script in the terminal
+# Activate the project environment. Resolved from this file's location, so the
+# script works from any working directory (and from CI).
+Pkg.activate(dirname(@__DIR__))
 Pkg.instantiate()
 
 println("Testing...")
@@ -20,6 +21,10 @@ function test_all()
     test_all_QuadraticCheck()
     test_all_Polynomial()
 end
+
+# Running this file runs the whole suite (this is what CI does).
+# To run a subset locally, comment this out and uncomment one of the lines below.
+test_all()
 
 # Uncomment the lines below to run specific test sets
 # 
