@@ -1,0 +1,11 @@
+# Environment for the standalone Chebfun comparison scripts in this directory.
+# These are developer utilities, not part of the test suite runtests.jl executes, and
+# their dependencies are deliberately kept out of the package's own Project.toml: CSV
+# and DataFrames alone accounted for roughly 160s of CI precompilation for code the
+# package never loads. Run them with `julia --project=test/ChebfunTests`.
+name = "ChebfunTests"
+
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
