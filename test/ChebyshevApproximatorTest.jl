@@ -1,4 +1,4 @@
-include("../../Julia-Rootfinding/src/ChebyshevApproximator.jl")
+include(joinpath(@__DIR__, "..", "src", "ChebyshevApproximator.jl"))
 using Test
 
 function test_all_ChebyshevApproximator()

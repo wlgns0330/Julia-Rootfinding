@@ -1,7 +1,7 @@
 # TrackedInterval.jl does not stand alone: getFinalInterval calls twoProd, which lives in
 # ChebyshevSubdivisionSolver.jl. Including the solver pulls in TrackedInterval.jl itself
 # (and SolverOptions.jl and QuadraticCheck.jl) transitively, so this covers both.
-include("../../Julia-Rootfinding/src/ChebyshevSubdivisionSolver.jl")
+include(joinpath(@__DIR__, "..", "src", "ChebyshevSubdivisionSolver.jl"))
 using Test
 
 # TrackedInterval.jl reads two globals that solve() normally sets on the way in

@@ -1,4 +1,4 @@
-include("../../Julia-Rootfinding/src/ChebyshevSubdivisionSolver.jl")
+include(joinpath(@__DIR__, "..", "src", "ChebyshevSubdivisionSolver.jl"))
 using Test
 
 # ---------------------------------------------------------------------------------

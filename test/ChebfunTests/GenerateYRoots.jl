@@ -1,6 +1,6 @@
 using Pkg
 include("ChebfunVars.jl")
-include("../../../Julia-Rootfinding/src/CombinedSolver.jl")
+include(joinpath(@__DIR__, "..", "..", "src", "CombinedSolver.jl"))
 
 using DelimitedFiles
 
