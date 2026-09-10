@@ -4,7 +4,6 @@ include("FastStructsWithTheirFunctions/FastTrackedInterval.jl")
 using LinearAlgebra
 using GenericLinearAlgebra
 using Logging
-using RecursiveArrayTools
 
 # TODO: import from a library like this one instead of crowding our sourcecode with pre-written code https://github.com/JeffreySarnoff/ErrorfreeArithmetic.jl/blob/main/src/sum.jl
 function fast_twoSum(a,b)

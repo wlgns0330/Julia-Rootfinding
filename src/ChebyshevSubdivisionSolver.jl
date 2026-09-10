@@ -4,7 +4,6 @@ include("StructsWithTheirFunctions/TrackedInterval.jl")
 using LinearAlgebra
 using GenericLinearAlgebra
 using Logging
-using RecursiveArrayTools
 
 # TODO: import from a library like this one instead of crowding our sourcecode with pre-written code https://github.com/JeffreySarnoff/ErrorfreeArithmetic.jl/blob/main/src/sum.jl
 function twoSum(a,b)
@@ -326,9 +325,12 @@ function transformChebInPlace1D(coeffs,alpha,beta)
         arr2 = arr3
         arr3 = arr
     end
-    VA = VectorOfArray(newSlices[1:maxRow])
-    return convert(Array,VA)
-    # return cat(newSlices[1:maxRow]...,dims = dims)
+    # newSlices holds equally sized slices of transformedCoeffs taken along `dims`, so
+    # stacking them along a new trailing axis rebuilds the tensor. This was
+    # `convert(Array, VectorOfArray(...))`, the only use of RecursiveArrayTools in the
+    # package -- a dependency that pulls in SymbolicIndexingInterface and broke
+    # precompilation on Julia 1.12.
+    return stack(newSlices[1:maxRow])
 end
 
 function TransformChebInPlaceND(coeffs, dim, alpha, beta, exact)

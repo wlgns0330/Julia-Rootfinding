@@ -1,0 +1,10 @@
+# Resolved by `Pkg.instantiate()` from Project.toml. Committing it pins the whole
+# dependency tree to whatever Julia version resolved it, which is why CI's Julia 1.12
+# job installed 1.11-era packages and failed to precompile them.
+/Manifest.toml
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+/docs/build/
+/docs/site/
+.DS_Store

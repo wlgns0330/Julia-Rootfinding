@@ -1,5 +1,3 @@
-using RecursiveArrayTools
-
 function clean_coeff(coeff)
     """Trims trailing all-zero slices (the highest-degree coefficients) along each axis,
     mirroring the Python yroots Polynomial.clean_coeff. Returns the trimmed array. Never
