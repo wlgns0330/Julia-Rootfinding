@@ -1145,6 +1145,28 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
         end
     else 
         #Otherwise, Subdivide
+        # Bail out rather than recurse forever. Subdivision previously had no depth limit at
+        # all -- the two warnings below fire and then it keeps going. On a system whose
+        # interval cannot shrink below the linear-solve padding (x + y = 0.3 against
+        # x + (1+eps) y = 0.3 at eps = 1e-10, where invCondNum sits on the wellConditioned
+        # threshold and the padding lands near 2e-6) every subdivision reports a change and
+        # the recursion never bottoms out, so solve() simply hangs.
+        #
+        # Giving up here reports the interval as a possible root region, exactly as the
+        # should_stop and possibleExtraRoot paths above do. That keeps the solver sound --
+        # no root is discarded, the box is just wider than it would otherwise be.
+        if solverOptions.level >= solverOptions.maxLevel
+            @warn "MAXIMUM SUBDIVISION DEPTH REACHED!\nGiving up on this interval at depth " *
+                        string(solverOptions.level) * " and reporting it as a possible root region." *
+                        "\nThe returned bounding box is wider than usual. Ensure the input functions" *
+                        " are continuous, smooth, and have only finitely many simple roots on the" *
+                        " search interval, or raise maxLevel in SolverOptions." maxlog=1
+            if isExteriorInterval(originalInterval, trackedInterval)
+                return [], [trackedInterval]
+            else
+                return [trackedInterval], []
+            end
+        end
         if solverOptions.level == 15
             @warn "HIGH SUBDIVISION DEPTH!\nSubdivision on the search interval has now reached recursion depth 15. Runtime may be long."
         elseif solverOptions.level == 25

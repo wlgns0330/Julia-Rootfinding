@@ -17,6 +17,9 @@ mutable struct SolverOptions
         Maximum number of zooms allowed before subdividing (prevents infinite infintesimal shrinking)
     level : int
         Depth of subdivision for the given interval.
+    maxLevel : int
+        Maximum subdivision depth before the solver gives up on an interval and reports it as a
+        possible root region (prevents unbounded recursion; see solvePolyRecursive).
     """
     verbose # = false (by default)
     exact # = false (by default)
@@ -26,12 +29,13 @@ mutable struct SolverOptions
     maxZoomCount # = 25 (by default)
     level # = 0 (by default)
     useFinalStep # = true (by default)
-    function SolverOptions(verbose=false,exact=false,constant_check=true,low_dim_quadratic_check=true,all_dim_quadratic_check=true,maxZoomCount=25,level=0,useFinalStep=true)
+    maxLevel # = 50 (by default)
+    function SolverOptions(verbose=false,exact=false,constant_check=true,low_dim_quadratic_check=true,all_dim_quadratic_check=true,maxZoomCount=25,level=0,useFinalStep=true,maxLevel=50)
         #Init all the Options to default value
-        new(verbose,exact,constant_check,low_dim_quadratic_check,all_dim_quadratic_check,maxZoomCount,level,useFinalStep)
+        new(verbose,exact,constant_check,low_dim_quadratic_check,all_dim_quadratic_check,maxZoomCount,level,useFinalStep,maxLevel)
     end
 end
 
 function copySO(SO)
-    return SolverOptions(SO.verbose,SO.exact,SO.constant_check,SO.low_dim_quadratic_check,SO.all_dim_quadratic_check,SO.maxZoomCount,SO.level,SO.useFinalStep)
+    return SolverOptions(SO.verbose,SO.exact,SO.constant_check,SO.low_dim_quadratic_check,SO.all_dim_quadratic_check,SO.maxZoomCount,SO.level,SO.useFinalStep,SO.maxLevel)
 end
