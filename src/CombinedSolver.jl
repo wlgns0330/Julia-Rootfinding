@@ -1,7 +1,3 @@
-include("ChebyshevApproximator.jl")
-include("ChebyshevSubdivisionSolver.jl")
-include("StructsWithTheirFunctions/Polynomial.jl")
-include("FastSolve/FastCombinedSolver.jl")
 
 
 """

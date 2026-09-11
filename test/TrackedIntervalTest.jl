@@ -1,6 +1,12 @@
 # TrackedInterval.jl does not stand alone: getFinalInterval calls twoProd, which lives in
 # ChebyshevSubdivisionSolver.jl. Including the solver pulls in TrackedInterval.jl itself
 # (and SolverOptions.jl and QuadraticCheck.jl) transitively, so this covers both.
+# These were previously pulled in as a side effect of including ChebyshevSubdivisionSolver.jl,
+# which used to include its own dependencies. Those includes now live in YRoots.jl, so a test
+# that loads a source file directly has to name what that file needs.
+include(joinpath(@__DIR__, "..", "src", "StructsWithTheirFunctions", "SolverOptions.jl"))
+include(joinpath(@__DIR__, "..", "src", "StructsWithTheirFunctions", "TrackedInterval.jl"))
+include(joinpath(@__DIR__, "..", "src", "QuadraticCheck.jl"))
 include(joinpath(@__DIR__, "..", "src", "ChebyshevSubdivisionSolver.jl"))
 using Test
 

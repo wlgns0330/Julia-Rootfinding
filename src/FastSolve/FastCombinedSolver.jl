@@ -1,5 +1,3 @@
-include("FastChebyshevApproximator.jl")
-include("FastChebyshevSubdivisionSolver.jl")
 
 """Finds and returns the roots of a system of functions on the search interval [a,b].
 

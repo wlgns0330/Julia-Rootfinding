@@ -2,6 +2,24 @@ module YRoots
 
 using PrecompileTools
 
+# Every file the package loads, listed here in dependency order. Previously each
+# algorithm file included its own dependencies, which made load order implicit and
+# spread across four files -- and let src/StructsWithTheirFunctions/MultiPower.jl sit
+# in the tree unreferenced, since nothing listed what was actually loaded.
+include("StructsWithTheirFunctions/SolverOptions.jl")
+include("StructsWithTheirFunctions/TrackedInterval.jl")
+include("QuadraticCheck.jl")
+include("ChebyshevApproximator.jl")
+include("ChebyshevSubdivisionSolver.jl")
+include("StructsWithTheirFunctions/Polynomial.jl")
+
+include("FastSolve/FastStructsWithTheirFunctions/FastSolverOptions.jl")
+include("FastSolve/FastStructsWithTheirFunctions/FastTrackedInterval.jl")
+include("FastSolve/FastQuadraticCheck.jl")
+include("FastSolve/FastChebyshevApproximator.jl")
+include("FastSolve/FastChebyshevSubdivisionSolver.jl")
+include("FastSolve/FastCombinedSolver.jl")
+
 include("CombinedSolver.jl")
 
 export solve, MultiPower, MultiCheb, eval_MultiPower, eval_MultiCheb
