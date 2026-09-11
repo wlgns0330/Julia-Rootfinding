@@ -6,8 +6,8 @@ using GenericLinearAlgebra
 using Logging
 
 # TODO: import from a library like this one instead of crowding our sourcecode with pre-written code https://github.com/JeffreySarnoff/ErrorfreeArithmetic.jl/blob/main/src/sum.jl
+"""Returns x,y such that a+b=x+y exactly, and a+b=x in floating point."""
 function twoSum(a,b)
-    """Returns x,y such that a+b=x+y exactly, and a+b=x in floating point."""
     x = a .+ b
     z = x .- a
     y = (a .- (x .- z)) .+ (b .- z)
@@ -15,8 +15,8 @@ function twoSum(a,b)
 end
 
 # TODO: import from a library instead
+"""Returns x,y such that a = x+y exactly and a = x in floating point."""
 function homebrewSplit(a)
-    """Returns x,y such that a = x+y exactly and a = x in floating point."""
     c = (type(2)^ceil(Int,precision/2) + 1) * a
     x = c-(c-a)
     y = a-x
@@ -24,8 +24,8 @@ function homebrewSplit(a)
 end
 
 # TODO: import from a library instead
+"""Returns x,y such that a*b=x+y exactly and a*b=x in floating point."""
 function twoProd(a,b)
-    """Returns x,y such that a*b=x+y exactly and a*b=x in floating point."""
     x = a .* b
     a1,a2 = homebrewSplit(a)
     b1,b2 = homebrewSplit(b)
@@ -38,36 +38,36 @@ end
 # transform per root, so the temporaries dominated there. Element for element these compute
 # exactly the same floating point operations as the broadcasts.
 # TODO: import from a library instead
+"""Returns x,y such that a*b = x+y exactly and a*b = x in floating point but with a already split."""
 function TwoProdWithSplit(a,b,a1,a2)
-    """Returns x,y such that a*b = x+y exactly and a*b = x in floating point but with a already split."""
     x = a*b
     b1,b2 = homebrewSplit(b)
     y=a2*b2-(((x-a1*b1)-a2*b1)-a1*b2)
     return x,y
 end 
 
+"""Gets the linear terms of the Chebyshev coefficient tensor M.
+
+Uses the fact that the linear terms are located at
+M[(0,0, ... ,0,1)]
+M[(0,0, ... ,1,0)]
+...
+M[(0,1, ... ,0,0)]
+M[(1,0, ... ,0,0)]
+which are indexes
+1, M.shape[-1], M.shape[-1]*M.shape[-2], ... when looking at M.ravel().
+
+Parameters
+----------
+M : array
+    The coefficient array to get the linear terms from
+
+Returns
+-------
+A: array
+    An array with the linear terms of M
+"""
 function getLinearTerms(M)
-    """Gets the linear terms of the Chebyshev coefficient tensor M.
-
-    Uses the fact that the linear terms are located at
-    M[(0,0, ... ,0,1)]
-    M[(0,0, ... ,1,0)]
-    ...
-    M[(0,1, ... ,0,0)]
-    M[(1,0, ... ,0,0)]
-    which are indexes
-    1, M.shape[-1], M.shape[-1]*M.shape[-2], ... when looking at M.ravel().
-
-    Parameters
-    ----------
-    M : array
-        The coefficient array to get the linear terms from
-
-    Returns
-    -------
-    A: array
-        An array with the linear terms of M
-    """
     # Index the tensor directly rather than building an untyped list: `A = []` gave a Vector{Any},
     # which forced every caller to convert, and boxed each coefficient on the way in.
     N = ndims(M)
@@ -83,28 +83,28 @@ function getLinearTerms(M)
     return A
 end
 
+"""Takes A, the linear terms of each function approximation, and makes any possible reduction 
+    in the interval based on the totalErrs.
+
+
+Parameters
+----------
+totalErrs : array
+    gives bounds for the function using error in our approximation and coefficients
+A : array 
+    each row represents a function with the linear coefficients of each dimension as the columns
+consts : array
+    constant terms for each function
+
+Returns
+-------
+a : array
+    lower bound
+b : array
+    lower bound
+    
+"""
 function linearCheck1(totalErrs,A,consts)
-    """Takes A, the linear terms of each function approximation, and makes any possible reduction 
-        in the interval based on the totalErrs.
-
-
-    Parameters
-    ----------
-    totalErrs : array
-        gives bounds for the function using error in our approximation and coefficients
-    A : array 
-        each row represents a function with the linear coefficients of each dimension as the columns
-    consts : array
-        constant terms for each function
-
-    Returns
-    -------
-    a : array
-        lower bound
-    b : array
-        lower bound
-        
-    """
     dim = length(A[1,:])
     a = -type.(ones(dim) * Inf)
     b = type.(ones(dim) * Inf)
@@ -172,10 +172,10 @@ function reduceSolvedDim(Ms, errors, trackedInterval, dim)
     return final_Ms,new_errors,trackedInterval
 end
 
+"""
+Does the 1d coeff array case for transformChebInPlace1D
+"""
 function transformChebInPlace1D1D(coeffs,alpha,beta)
-    """
-    Does the 1d coeff array case for transformChebInPlace1D
-    """
     coeffs_shape = size(coeffs)
     last_dim_length = coeffs_shape[end]
     transformedCoeffs = zeros(type,coeffs_shape)
@@ -234,27 +234,27 @@ function transformChebInPlace1D1D(coeffs,alpha,beta)
     return transformedCoeffs[1:maxRow]
 end
 
+"""Applies the transformation alpha*x + beta to one dimension of a Chebyshev approximation.
+
+Recursively finds each column of the transformation matrix C from the previous two columns
+and then performs entrywise matrix multiplication for each entry of the column, thus enabling
+the transformation to occur while only retaining three columns of C in memory at a time.
+
+Parameters
+----------
+coeffs : array
+    The coefficient array
+alpha : double
+    The scaler of the transformation
+beta : double
+    The shifting of the transformation
+
+Returns
+-------
+transformedCoeffs : array
+    The new coefficient array following the transformation
+"""
 function transformChebInPlace1D(coeffs,alpha,beta)
-    """Applies the transformation alpha*x + beta to one dimension of a Chebyshev approximation.
-
-    Recursively finds each column of the transformation matrix C from the previous two columns
-    and then performs entrywise matrix multiplication for each entry of the column, thus enabling
-    the transformation to occur while only retaining three columns of C in memory at a time.
-
-    Parameters
-    ----------
-    coeffs : array
-        The coefficient array
-    alpha : double
-        The scaler of the transformation
-    beta : double
-        The shifting of the transformation
-
-    Returns
-    -------
-    transformedCoeffs : array
-        The new coefficient array following the transformation
-    """
     coeffs_shape = size(coeffs)
     if length(coeffs_shape) == 1
         return transformChebInPlace1D1D(coeffs,alpha,beta)
@@ -333,27 +333,27 @@ function transformChebInPlace1D(coeffs,alpha,beta)
     return stack(newSlices[1:maxRow])
 end
 
+"""Transforms a single dimension of a Chebyshev approximation for a polynomial.
+
+Parameters
+----------
+coeffs : array
+    The coefficient tensor to transform
+dim : int
+    The index of the dimension to transform (numpy index for now)
+alpha: double
+    The scaler of the transformation
+beta: double
+    The shifting of the transformation
+exact: bool
+    Whether to perform the transformation with higher precision to minimize error (currently unimplemented)
+
+Returns
+-------
+transformedCoeffs : array
+    The new coefficient array following the transformation
+"""
 function TransformChebInPlaceND(coeffs, dim, alpha, beta, exact)
-    """Transforms a single dimension of a Chebyshev approximation for a polynomial.
-
-    Parameters
-    ----------
-    coeffs : array
-        The coefficient tensor to transform
-    dim : int
-        The index of the dimension to transform (numpy index for now)
-    alpha: double
-        The scaler of the transformation
-    beta: double
-        The shifting of the transformation
-    exact: bool
-        Whether to perform the transformation with higher precision to minimize error (currently unimplemented)
-
-    Returns
-    -------
-    transformedCoeffs : array
-        The new coefficient array following the transformation
-    """
 
     #TODO: Could we calculate the allowed error beforehand and pass it in here?
     #TODO: Make this work for the power basis polynomials
@@ -378,54 +378,54 @@ function TransformChebInPlaceND(coeffs, dim, alpha, beta, exact)
     end
 end
 
+"""Returns an upper bound on the error of transforming the Chebyshev approximation M
+
+In the transformation of dimension dim in M, the matrix multiplication of M by the transformation
+matrix C has each element of M involved in n element multiplications, where n is the number of rows
+in C, which is equal to the degree of approximation of M in dimension dim, or M.shape[dim].
+
+Parameters
+----------
+M : array
+    The Chebyshev approximation coefficient tensor being transformed
+dim : int
+    The dimension of M being transformed
+
+Returns
+-------
+error : float
+    The upper bound for the error associated with the transformation of dimension dim in M
+"""
 function getTransformationError(M,dim)
-    """Returns an upper bound on the error of transforming the Chebyshev approximation M
-
-    In the transformation of dimension dim in M, the matrix multiplication of M by the transformation
-    matrix C has each element of M involved in n element multiplications, where n is the number of rows
-    in C, which is equal to the degree of approximation of M in dimension dim, or M.shape[dim].
-
-    Parameters
-    ----------
-    M : array
-        The Chebyshev approximation coefficient tensor being transformed
-    dim : int
-        The dimension of M being transformed
-
-    Returns
-    -------
-    error : float
-        The upper bound for the error associated with the transformation of dimension dim in M
-    """
 
     machEps = type(2)^-(precision-1)
     error = size(M, ndims(M) - dim + 1) * machEps * sum(abs, M)
     return error #TODO: Figure out a more rigurous bound!
 end
 
+"""Transforms an entire Chebyshev coefficient matrix using the transformation xHat = alpha*x + beta.
+
+Parameters
+----------
+M : array
+    The chebyshev coefficient matrix
+alphas : iterable
+    The scalers in each dimension of the transformation.
+betas : iterable
+    The offset in each dimension of the transformation.
+error : float
+    A bound on the error of the chebyshev approximation
+exact : bool
+    Whether to perform the transformation with higher precision to minimize error
+
+Returns
+-------
+M : numpy array
+    The coefficient matrix transformed to the new interval
+error : float
+    An upper bound on the error of the transformation
+"""
 function transformCheb(M,alphas,betas,error,exact)
-    """Transforms an entire Chebyshev coefficient matrix using the transformation xHat = alpha*x + beta.
-
-    Parameters
-    ----------
-    M : array
-        The chebyshev coefficient matrix
-    alphas : iterable
-        The scalers in each dimension of the transformation.
-    betas : iterable
-        The offset in each dimension of the transformation.
-    error : float
-        A bound on the error of the chebyshev approximation
-    exact : bool
-        Whether to perform the transformation with higher precision to minimize error
-
-    Returns
-    -------
-    M : numpy array
-        The coefficient matrix transformed to the new interval
-    error : float
-        An upper bound on the error of the transformation
-    """
     #This just does the matrix multiplication on each dimension. Except it's by a tensor.
     ndim = length(size(M))
     for (dim,alpha,beta) in zip(1:ndim,alphas,betas)
@@ -435,29 +435,29 @@ function transformCheb(M,alphas,betas,error,exact)
     return M, error
 end
 
+"""Transforms an entire list of Chebyshev approximations to a new interval xHat = alpha*x + beta.
+
+Parameters
+----------
+Ms : list of arrays
+    The chebyshev coefficient matrices
+alphas : iterable
+    The scalers of the transformation we are doing.
+betas : iterable
+    The offsets of the transformation we are doing.
+errors : array
+    A bound on the error of each Chebyshev approximation
+exact : bool
+    Whether to perform the transformation with higher precision to minimize error
+
+Returns
+-------
+newMs : list of arrays
+    The coefficient matrices transformed to the new interval
+newErrors : array
+    The new errors associated with the transformed coefficient matrices
+"""
 function transformChebToInterval(Ms, alphas, betas, errors, exact)
-    """Transforms an entire list of Chebyshev approximations to a new interval xHat = alpha*x + beta.
-
-    Parameters
-    ----------
-    Ms : list of arrays
-        The chebyshev coefficient matrices
-    alphas : iterable
-        The scalers of the transformation we are doing.
-    betas : iterable
-        The offsets of the transformation we are doing.
-    errors : array
-        A bound on the error of each Chebyshev approximation
-    exact : bool
-        Whether to perform the transformation with higher precision to minimize error
-
-    Returns
-    -------
-    newMs : list of arrays
-        The coefficient matrices transformed to the new interval
-    newErrors : array
-        The new errors associated with the transformed coefficient matrices
-    """
     #Transform the chebyshev polynomials
     newMs = []
     newErrors = []
@@ -481,29 +481,29 @@ function findVertices(A,b,errors)
     return as,bs
 end
 
+"""Finds a smaller region in which any root must be.
+
+Parameters
+----------
+Ms : list of numpy arrays
+    Each numpy array is the coefficient tensor of a chebyshev polynomials
+errors : iterable of floats
+    The maximum error of chebyshev approximations
+finalStep : bool
+    Whether we are in the final step of the algorithm
+
+Returns
+-------
+newInterval : numpy array
+    The smaller interval where any root must be
+changed : bool
+    Whether the interval has shrunk at all
+should_stop : bool
+    Whether we should stop subdividing
+throwout :
+    Whether we should throw out the interval entirely
+"""
 function boundingIntervalLinearSystem(Ms, errors, finalStep)
-    """Finds a smaller region in which any root must be.
-
-    Parameters
-    ----------
-    Ms : list of numpy arrays
-        Each numpy array is the coefficient tensor of a chebyshev polynomials
-    errors : iterable of floats
-        The maximum error of chebyshev approximations
-    finalStep : bool
-        Whether we are in the final step of the algorithm
-
-    Returns
-    -------
-    newInterval : numpy array
-        The smaller interval where any root must be
-    changed : bool
-        Whether the interval has shrunk at all
-    should_stop : bool
-        Whether we should stop subdividing
-    throwout :
-        Whether we should throw out the interval entirely
-    """
     if finalStep
         errors = zeros(type, size(errors))
     end
@@ -635,37 +635,37 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
     end
 end
 
+"""One iteration of shrinking an interval that may contain roots.
+
+Calls BoundingIntervaLinearSystem which determines a smaller interval in which any roots are
+bound to lie. Then calls transformChebToInterval to transform the current coefficient
+approximations to the new interval.
+
+Parameters
+----------
+Ms : list of arrays
+    The Chebyshev coefficient tensors of each approximation
+errors : array
+    An upper bound on the error of each Chebyshev approximation
+trackedInterval : TrackedInterval
+    The current interval for which the Chebyshev approximations are valid
+exact : bool
+    Whether the transformation should be done with higher precision to minimize error
+
+Returns
+-------
+Ms : list of arrays
+    The chebyshev coefficient matrices transformed to the new interval
+errors : array
+    The new errors associated with the transformed coefficient matrices
+trackedInterval : TrackedInterval
+    The new interval that the transformed coefficient matrices are valid for
+changed : bool
+    Whether or not the interval shrunk significantly during the iteration
+should_stop : bool
+    Whether or not to continue subdiviing after the iteration of shrinking is completed
+"""
 function zoomInOnIntervalIter(Ms, errors, trackedInterval, exact)
-    """One iteration of shrinking an interval that may contain roots.
-
-    Calls BoundingIntervaLinearSystem which determines a smaller interval in which any roots are
-    bound to lie. Then calls transformChebToInterval to transform the current coefficient
-    approximations to the new interval.
-
-    Parameters
-    ----------
-    Ms : list of arrays
-        The Chebyshev coefficient tensors of each approximation
-    errors : array
-        An upper bound on the error of each Chebyshev approximation
-    trackedInterval : TrackedInterval
-        The current interval for which the Chebyshev approximations are valid
-    exact : bool
-        Whether the transformation should be done with higher precision to minimize error
-
-    Returns
-    -------
-    Ms : list of arrays
-        The chebyshev coefficient matrices transformed to the new interval
-    errors : array
-        The new errors associated with the transformed coefficient matrices
-    trackedInterval : TrackedInterval
-        The new interval that the transformed coefficient matrices are valid for
-    changed : bool
-        Whether or not the interval shrunk significantly during the iteration
-    should_stop : bool
-        Whether or not to continue subdiviing after the iteration of shrinking is completed
-    """
 
     dim = length(Ms)
     #Zoom in on the current interval
@@ -704,23 +704,23 @@ function zoomInOnIntervalIter(Ms, errors, trackedInterval, exact)
     return Ms, errors, trackedInterval, changed, should_stop
 end
 
-function getSubdivisionDims(Ms,trackedInterval,level)
-    """Decides which dimensions to subdivide in and in what order.
-    
-    Parameters
-    ----------
-    Ms : list of arrays
-        The chebyshev coefficient matrices
-    trackedInterval : trackedInterval
-        The interval to be subdivided
-    level : int
-        The current depth of subdivision from the original interval
+"""Decides which dimensions to subdivide in and in what order.
 
-    Returns
-    -------
-    allDims : numpy array
-        The ith row gives the dimensions in which Ms[i] should be subdivided, in order.
-    """
+Parameters
+----------
+Ms : list of arrays
+    The chebyshev coefficient matrices
+trackedInterval : trackedInterval
+    The interval to be subdivided
+level : int
+    The current depth of subdivision from the original interval
+
+Returns
+-------
+allDims : numpy array
+    The ith row gives the dimensions in which Ms[i] should be subdivided, in order.
+"""
+function getSubdivisionDims(Ms,trackedInterval,level)
     dim = length(Ms)
     dims_to_consider = collect(1:dim)
     new_dims = Int[]
@@ -763,28 +763,28 @@ end
 #     (argmax(interval[1,:] - interval[2,:]) - 1) .* ones(Int(length(interval)/2))'
 # end
 
+"""Gets a particular order of matrices needed in getSubdivisionIntervals (helper function).
+
+Takes the order of dimensions in which a Chebyshev coefficient tensor M was subdivided and gets
+the order of the indexes that will arrange the list of resulting transformed matrices as if the
+dimensions had bee subdivided in standard index order. For example, if dimensions 0, 3, 1 were
+subdivided in that order, this function returns the order [0,2,1,3,4,6,5,7] corresponding to the
+indices of currMs such that when arranged in this order, it appears as if the dimensions were
+subdivided in order 0, 1, 3.
+
+Parameters
+----------
+order : array
+    The order of dimensions along which a coefficient tensor was subdivided
+
+Returns
+-------
+invOrder : array
+    The order of indices of currMs (in the function getSubdivisionIntervals) that arranges the
+    matrices resulting from the subdivision as if the original matrix had been subdivided in
+    numerical order
+"""
 function getInverseOrder(order)
-    """Gets a particular order of matrices needed in getSubdivisionIntervals (helper function).
-
-    Takes the order of dimensions in which a Chebyshev coefficient tensor M was subdivided and gets
-    the order of the indexes that will arrange the list of resulting transformed matrices as if the
-    dimensions had bee subdivided in standard index order. For example, if dimensions 0, 3, 1 were
-    subdivided in that order, this function returns the order [0,2,1,3,4,6,5,7] corresponding to the
-    indices of currMs such that when arranged in this order, it appears as if the dimensions were
-    subdivided in order 0, 1, 3.
-
-    Parameters
-    ----------
-    order : array
-        The order of dimensions along which a coefficient tensor was subdivided
-
-    Returns
-    -------
-    invOrder : array
-        The order of indices of currMs (in the function getSubdivisionIntervals) that arranges the
-        matrices resulting from the subdivision as if the original matrix had been subdivided in
-        numerical order
-    """
     n = length(order)
     # Rank of each entry of `order`; the old code round-tripped this through Float64 and then
     # back through Int.
@@ -811,31 +811,31 @@ function getInverseOrder(order)
     return Tuple(invOrder)
 end
 
+"""Gets the matrices, error bounds, and intervals for the next iteration of subdivision.
+
+Parameters
+----------
+Ms : list of arrays
+    The chebyshev coefficient matrices
+errors : array
+    An upper bound on the error of each Chebyshev approximation
+trackedInterval : trackedInterval
+    The interval to be subdivided
+exact : bool
+    Whether transformations should be completed with higher precision to minimize error
+level : int
+    The current depth of subdivision from the original interval
+
+Returns
+-------
+allMs : list of arrays
+    The transformed coefficient matrices associated with each new interval
+allErrors : array
+    A list of upper bounds for the errors associated with each transformed coefficient matrix
+allIntervals : list of TrackedIntervals
+    The intervals from the subdivision (corresponding one to one with the matrices in allMs)
+"""
 function getSubdivisionIntervals(Ms,errors,trackedInterval,exact,level;oneDimension=false)
-    """Gets the matrices, error bounds, and intervals for the next iteration of subdivision.
-
-    Parameters
-    ----------
-    Ms : list of arrays
-        The chebyshev coefficient matrices
-    errors : array
-        An upper bound on the error of each Chebyshev approximation
-    trackedInterval : trackedInterval
-        The interval to be subdivided
-    exact : bool
-        Whether transformations should be completed with higher precision to minimize error
-    level : int
-        The current depth of subdivision from the original interval
-
-    Returns
-    -------
-    allMs : list of arrays
-        The transformed coefficient matrices associated with each new interval
-    allErrors : array
-        A list of upper bounds for the errors associated with each transformed coefficient matrix
-    allIntervals : list of TrackedIntervals
-        The intervals from the subdivision (corresponding one to one with the matrices in allMs)
-    """
     
     if oneDimension
         subdivisionDims = getSubdivisionDim(reduce(vcat,[[size(M)...] for M in Ms]),length(Ms))
@@ -906,29 +906,29 @@ function getSubdivisionIntervals(Ms,errors,trackedInterval,exact,level;oneDimens
     return allMs, allErrors, allIntervals
 end
 
+"""Determines if the current interval is exterior to its original interval."""
 function isExteriorInterval(originalInterval,trackedInterval)
-    """Determines if the current interval is exterior to its original interval."""
     return any(getIntervalForCombining(trackedInterval) .== getIntervalForCombining(originalInterval))
 end
 
+"""Reduces the degree of each chebyshev approximation M when doing so has negligible error.
+
+The coefficient matrices are trimmed in place. This function iteratively looks at the highest
+degree coefficient row of each M along each dimension and trims it as long as the error introduced
+is less than the allowed error increase for that dimension.
+
+Parameters
+----------
+Ms : list of arrays
+    The chebyshev approximations of the functions
+errors : array
+    The max error of the chebyshev approximation from the function on the interval
+relApproxTol : double
+    The relative error increase allowed
+absApproxTol : double
+    The absolute error increase allowed
+"""
 function trimMs(Ms, errors, relApproxTol=type(1e-3), absApproxTol=type(2)^-(precision-1))
-    """Reduces the degree of each chebyshev approximation M when doing so has negligible error.
-
-    The coefficient matrices are trimmed in place. This function iteratively looks at the highest
-    degree coefficient row of each M along each dimension and trims it as long as the error introduced
-    is less than the allowed error increase for that dimension.
-
-    Parameters
-    ----------
-    Ms : list of arrays
-        The chebyshev approximations of the functions
-    errors : array
-        The max error of the chebyshev approximation from the function on the interval
-    relApproxTol : double
-        The relative error increase allowed
-    absApproxTol : double
-        The absolute error increase allowed
-    """
     dim = ndims(Ms[1])
     buf = eltype(Ms[1])[]
     for polyNum in 1:dim #Loop through the polynomials
@@ -995,29 +995,29 @@ function keepFirst(M::AbstractArray{T,N}, d::Int, kept::Int) where {T,N}
     return M[idx...]
 end
 
+"""Recursively shrinks and subdivides the given interval to find the locations of all roots.
+
+Parameters
+----------
+Ms : list of arrays
+    The chebyshev approximations of the functions
+trackedInterval : TrackedInterval
+    The information about the interval we are solving on.
+errors : array
+    An upper bound for the error of the Chebyshev approximation of the function on the interval
+solverOptions : SolverOptions
+    Desired settings for running interval checks, transformations, and subdivision.
+
+Returns
+-------
+boundingBoxesInterior : list of arrays (optional)
+    Each element of the list is an interval in which there may be a root. The interval is on the interior of the current
+    interval
+boundingBoxesExterior : list of arrays (optional)
+    Each element of the list is an interval in which there may be a root. The interval is on the exterior of the current
+    interval
+"""
 function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
-    """Recursively shrinks and subdivides the given interval to find the locations of all roots.
-
-    Parameters
-    ----------
-    Ms : list of arrays
-        The chebyshev approximations of the functions
-    trackedInterval : TrackedInterval
-        The information about the interval we are solving on.
-    errors : array
-        An upper bound for the error of the Chebyshev approximation of the function on the interval
-    solverOptions : SolverOptions
-        Desired settings for running interval checks, transformations, and subdivision.
-
-    Returns
-    -------
-    boundingBoxesInterior : list of arrays (optional)
-        Each element of the list is an interval in which there may be a root. The interval is on the interior of the current
-        interval
-    boundingBoxesExterior : list of arrays (optional)
-        Each element of the list is an interval in which there may be a root. The interval is on the exterior of the current
-        interval
-    """
 
     #TODO: Check if trackedInterval.interval has width 0 in some dimension, in which case we should get rid of that dimension.
     #If the interval is a point, return it
@@ -1264,37 +1264,37 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     end
 end
 
+"""
+Initiates shrinking and subdivision recursion and returns the roots and bounding boxes.
+
+Parameters
+----------
+Ms : Vector{Array}
+The Chebyshev approximations of the functions on the interval given to CombinedSolver
+errors : Vector{Float64}
+The max error of the Chebyshev approximation from the function on the interval
+verbose : Bool
+Defaults to false. Whether or not to output progress of solving to the terminal.
+returnBoundingBoxes : Bool (Optional)
+Defaults to false. If true, returns the bounding boxes around each root as well as the roots.
+exact : Bool
+Whether transformations should be done with higher precision to minimize error.
+constant_check : Bool
+Defaults to true. Whether or not to run constant term check after each subdivision.
+low_dim_quadratic_check : Bool
+Defaults to true. Whether or not to run quadratic check in dim 2, 3.
+all_dim_quadratic_check : Bool
+Defaults to false. Whether or not to run quadratic check in dim ≥ 4.
+
+Returns
+-------
+roots : Vector
+The roots of the system of functions on the interval given to Combined Solver
+boundingBoxes : Vector{Array} (optional)
+List of intervals for each root in which the root is bound to lie.
+"""
 function solveChebyshevSubdivision(Ms, errors; verbose = false, returnBoundingBoxes = false, exact = false, constant_check = true, low_dim_quadratic_check = true, all_dim_quadratic_check = false)
 
-    """
-    Initiates shrinking and subdivision recursion and returns the roots and bounding boxes.
-
-    Parameters
-    ----------
-    Ms : Vector{Array}
-    The Chebyshev approximations of the functions on the interval given to CombinedSolver
-    errors : Vector{Float64}
-    The max error of the Chebyshev approximation from the function on the interval
-    verbose : Bool
-    Defaults to false. Whether or not to output progress of solving to the terminal.
-    returnBoundingBoxes : Bool (Optional)
-    Defaults to false. If true, returns the bounding boxes around each root as well as the roots.
-    exact : Bool
-    Whether transformations should be done with higher precision to minimize error.
-    constant_check : Bool
-    Defaults to true. Whether or not to run constant term check after each subdivision.
-    low_dim_quadratic_check : Bool
-    Defaults to true. Whether or not to run quadratic check in dim 2, 3.
-    all_dim_quadratic_check : Bool
-    Defaults to false. Whether or not to run quadratic check in dim ≥ 4.
-
-    Returns
-    -------
-    roots : Vector
-    The roots of the system of functions on the interval given to Combined Solver
-    boundingBoxes : Vector{Array} (optional)
-    List of intervals for each root in which the root is bound to lie.
-    """
 
     # Assert that we have n nD polys
     if any(ndims(M) != length(Ms) for M in Ms)

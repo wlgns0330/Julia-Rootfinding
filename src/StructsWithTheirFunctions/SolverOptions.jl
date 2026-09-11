@@ -1,26 +1,26 @@
-mutable struct SolverOptions
-    """Settings for running interval checks, transformations, and subdivision in solvePolyRecursive.
+"""Settings for running interval checks, transformations, and subdivision in solvePolyRecursive.
 
-    Parameters
-    ----------
-    verbose : bool
-        Defaults to false. Whether or not to output progress of solving to the terminal.
-    exact : bool
-        Defaults to false. Whether the transformation in TransformChebInPlaceND should minimize error.
-    constant_check : bool
-        Defaults to true. Whether or not to run constant term check after each subdivision.
-    low_dim_quadratic_check : bool
-        Defaults to true. Whether or not to run quadratic check in dim 2, 3.
-    all_dim_quadratic_check : bool
-        Defaults to false. Whether or not to run quadratic check in dim >= 4.
-    maxZoomCount : int
-        Maximum number of zooms allowed before subdividing (prevents infinite infintesimal shrinking)
-    level : int
-        Depth of subdivision for the given interval.
-    maxLevel : int
-        Maximum subdivision depth before the solver gives up on an interval and reports it as a
-        possible root region (prevents unbounded recursion; see solvePolyRecursive).
-    """
+Parameters
+----------
+verbose : bool
+    Defaults to false. Whether or not to output progress of solving to the terminal.
+exact : bool
+    Defaults to false. Whether the transformation in TransformChebInPlaceND should minimize error.
+constant_check : bool
+    Defaults to true. Whether or not to run constant term check after each subdivision.
+low_dim_quadratic_check : bool
+    Defaults to true. Whether or not to run quadratic check in dim 2, 3.
+all_dim_quadratic_check : bool
+    Defaults to false. Whether or not to run quadratic check in dim >= 4.
+maxZoomCount : int
+    Maximum number of zooms allowed before subdividing (prevents infinite infintesimal shrinking)
+level : int
+    Depth of subdivision for the given interval.
+maxLevel : int
+    Maximum subdivision depth before the solver gives up on an interval and reports it as a
+    possible root region (prevents unbounded recursion; see solvePolyRecursive).
+"""
+mutable struct SolverOptions
     verbose # = false (by default)
     exact # = false (by default)
     constant_check # = true (by default)

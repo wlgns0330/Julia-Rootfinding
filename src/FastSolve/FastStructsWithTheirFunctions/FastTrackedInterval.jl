@@ -1,31 +1,31 @@
-mutable struct FastTrackedInterval 
-    """Tracks the properties of and changes to each interval as it passes through the solver.
+"""Tracks the properties of and changes to each interval as it passes through the solver.
 
-    Parameters
-    ----------
-    topInterval: array
-        The original interval before any changes
-    interval: array
-        The current interval (lower bound and upper bound for each dimension in order)
-    transforms: array
-        List of the alpha and beta values for all the transformations the interval has undergone
-    ndim: Int
-        The number of dimensions of which the interval consists
-    empty: bool
-        Whether the interval is known to contain no roots
-    finalStep: bool
-        Whether the interval is in the final step (zooming in on the bounding box to a point at the end)
-    canThrowOutFinalStep: bool
-        Defaults to false. Whether or not the interval should be thrown out if empty in the final step
-        of solving. Changed to true if subdivision occurs in the final step.
-    possibleDuplicateRoots: array
-        Any multiple roots found through subdivision in the final step that would have been
-        returned as just one root before the final step
-    possibleExtraRoot: bool
-        Defaults to false. Whether or not the interval would have been thrown out during the final step.
-    nextTransformPoints: array
-        Where the midpoint of the next subdivision should be for each dimension
-    """
+Parameters
+----------
+topInterval: array
+    The original interval before any changes
+interval: array
+    The current interval (lower bound and upper bound for each dimension in order)
+transforms: array
+    List of the alpha and beta values for all the transformations the interval has undergone
+ndim: Int
+    The number of dimensions of which the interval consists
+empty: bool
+    Whether the interval is known to contain no roots
+finalStep: bool
+    Whether the interval is in the final step (zooming in on the bounding box to a point at the end)
+canThrowOutFinalStep: bool
+    Defaults to false. Whether or not the interval should be thrown out if empty in the final step
+    of solving. Changed to true if subdivision occurs in the final step.
+possibleDuplicateRoots: array
+    Any multiple roots found through subdivision in the final step that would have been
+    returned as just one root before the final step
+possibleExtraRoot: bool
+    Defaults to false. Whether or not the interval would have been thrown out during the final step.
+nextTransformPoints: array
+    Where the midpoint of the next subdivision should be for each dimension
+"""
+mutable struct FastTrackedInterval 
 
     # This struct is implemented by passing in one argument "interval"
     # eg: TrackedInterval([-1;-3.4;0])
@@ -61,19 +61,19 @@ end
 
 """==============================FUNCTIONS FOR TRACKED INTERVAL=============================="""
 
+"""Ensures that an interval that has not subdivided cannot be thrown out on the final step."""
 function fast_canThrowOut(trackedInterval::FastTrackedInterval)
-    """Ensures that an interval that has not subdivided cannot be thrown out on the final step."""
     return !trackedInterval.finalStep || trackedInterval.canThrowOutFinalStep
 end
 
-function fast_addTransform(trackedInterval::FastTrackedInterval, subInterval)
-    """Adds the next alpha and beta values to the list transforms and updates the current interval.
+"""Adds the next alpha and beta values to the list transforms and updates the current interval.
 
-    Parameters:
-    -----------
-    subInterval : array
-        The subinterval to which the current interval is being reduced
-    """
+Parameters:
+-----------
+subInterval : array
+    The subinterval to which the current interval is being reduced
+"""
+function fast_addTransform(trackedInterval::FastTrackedInterval, subInterval)
     #Ensure the interval has non zero size; mark it empty if it doesn't
     # NOTE: `subInterval[1,:] > subInterval[2,:]` compares the two rows lexicographically and
     # yields a single Bool, so `any` of it is just that Bool. Preserved as-is; only the row
@@ -176,14 +176,14 @@ function fast_replayTransforms(topInterval::Matrix{Float64}, transforms::Vector{
     return interval, err
 end
 
-function fast_getFinalInterval(trackedInterval::FastTrackedInterval)
-    """Finds the point that should be reported as the root (midpoint of the final step interval).
+"""Finds the point that should be reported as the root (midpoint of the final step interval).
 
-    Returns
-    -------
-    root: numpy array
-        The final point to be reported as the root of the interval
-    """
+Returns
+-------
+root: numpy array
+    The final point to be reported as the root of the interval
+"""
+function fast_getFinalInterval(trackedInterval::FastTrackedInterval)
     transformsToUse = trackedInterval.finalStep ? trackedInterval.preFinalTransforms : trackedInterval.transforms
     finalInterval, finalIntervalError = fast_replayTransforms(trackedInterval.topInterval, transformsToUse)
     n = size(finalInterval, 2)
@@ -205,14 +205,14 @@ function fast_getFinalInterval(trackedInterval::FastTrackedInterval)
     return trackedInterval.finalInterval
 end
 
-function fast_getFinalPoint(trackedInterval::FastTrackedInterval)
-    """Finds the point that should be reported as the root (midpoint of the final step interval).
+"""Finds the point that should be reported as the root (midpoint of the final step interval).
 
-    Returns
-    -------
-    root: numpy array
-        The final point to be reported as the root of the interval
-    """
+Returns
+-------
+root: numpy array
+    The final point to be reported as the root of the interval
+"""
+function fast_getFinalPoint(trackedInterval::FastTrackedInterval)
     if !trackedInterval.finalStep  # If no final step, use the midpoint of the calculated final interval.
         fi = trackedInterval.finalInterval
         n = size(fi, 2)
@@ -237,8 +237,8 @@ function fast_getFinalPoint(trackedInterval::FastTrackedInterval)
 end
 
 # not thoroughly tested
+"""Gets the volume of the current interval."""
 function fast_sizeOfInterval(trackedInterval)
-    """Gets the volume of the current interval."""
     iv = trackedInterval.interval
     v = 1.0
     @inbounds for d in 1:size(iv, 2)
@@ -247,8 +247,8 @@ function fast_sizeOfInterval(trackedInterval)
     return v
 end
 
+"""Gets the lengths along each dimension of the current interval."""
 function fast_dimSize(trackedInterval)
-    """Gets the lengths along each dimension of the current interval."""
     iv = trackedInterval.interval
     n = size(iv, 2)
     out = Vector{Float64}(undef, n)
@@ -258,8 +258,8 @@ function fast_dimSize(trackedInterval)
     return out
 end
 
+"""Gets the lengths along each dimension of the current interval."""
 function fast_finalDimSize(trackedInterval)
-    """Gets the lengths along each dimension of the current interval."""
     iv = trackedInterval.finalInterval
     n = size(iv, 2)
     out = Vector{Float64}(undef, n)
@@ -269,8 +269,8 @@ function fast_finalDimSize(trackedInterval)
     return out
 end
 
+"""Returns a deep copy of the current interval with all changes and properties preserved."""
 function fast_copyInterval(trackedInterval::FastTrackedInterval)
-    """Returns a deep copy of the current interval with all changes and properties preserved."""
     newone = FastTrackedInterval(trackedInterval.topInterval)
     newone.interval = copy(trackedInterval.interval)
     newone.transforms = copy(trackedInterval.transforms)
@@ -287,8 +287,8 @@ function fast_copyInterval(trackedInterval::FastTrackedInterval)
     return newone
 end
 
+"""Determines if point is contained in the current interval."""
 function fast_contains(trackedInterval::FastTrackedInterval, point)
-    """Determines if point is contained in the current interval."""
     # Elementwise, not `>=`/`<=`. Those compare vectors lexicographically in Julia, so
     # they stop at the first differing coordinate: with x in [-1,1] and y in [-2,2],
     # the point [0, 5] compared lexicographically is "less than" [1, 2] on its first
@@ -296,11 +296,11 @@ function fast_contains(trackedInterval::FastTrackedInterval, point)
     return all(point .>= trackedInterval.interval[1,:]) && all(point .<= trackedInterval.interval[2,:])
 end
 
-function fast_overlapsWith(trackedInterval::FastTrackedInterval, otherInterval::FastTrackedInterval)
-    """Determines if the otherInterval overlaps with the current interval.
+"""Determines if the otherInterval overlaps with the current interval.
 
-    Returns True if the lower bound of one interval is less than the upper bound of the other
-        in EVERY dimension; returns False otherwise."""
+Returns True if the lower bound of one interval is less than the upper bound of the other
+    in EVERY dimension; returns False otherwise."""
+function fast_overlapsWith(trackedInterval::FastTrackedInterval, otherInterval::FastTrackedInterval)
     currentInterval = fast_getIntervalForCombining(trackedInterval)
     otherInterval = fast_getIntervalForCombining(otherInterval)
     size_arr = size(currentInterval)
@@ -323,8 +323,8 @@ function fast_overlapsWith(trackedInterval::FastTrackedInterval, otherInterval::
     return true
 end
 
+"""Determines if the current interval has essentially length 0 in each dimension."""
 function fast_isPoint(trackedInterval::FastTrackedInterval, macheps = 2. ^-52)
-    """Determines if the current interval has essentially length 0 in each dimension."""
     iv = trackedInterval.interval
     @inbounds for d in 1:size(iv, 2)
         abs(iv[1, d] - iv[2, d]) < macheps || return false
@@ -332,15 +332,15 @@ function fast_isPoint(trackedInterval::FastTrackedInterval, macheps = 2. ^-52)
     return true
 end
 
+"""Prepares for the final step by saving the current interval and its transform list."""
 function fast_startFinalStep(trackedInterval::FastTrackedInterval)
-    """Prepares for the final step by saving the current interval and its transform list."""
     trackedInterval.finalStep = true
     trackedInterval.preFinalInterval = copy(trackedInterval.interval)
     trackedInterval.preFinalTransforms = copy(trackedInterval.transforms)
 end
 
+"""Returns the interval to be used in combining intervals to report at the end."""
 function fast_getIntervalForCombining(trackedInterval::FastTrackedInterval)
-    """Returns the interval to be used in combining intervals to report at the end."""
     return trackedInterval.finalStep ? trackedInterval.preFinalInterval : trackedInterval.interval
 end
 

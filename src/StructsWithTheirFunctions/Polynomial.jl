@@ -1,8 +1,8 @@
+"""Trims trailing all-zero slices (the highest-degree coefficients) along each axis,
+mirroring the Python yroots Polynomial.clean_coeff. Returns the trimmed array. Never
+shrinks an axis below length 1. Because only all-zero slices are removed, trimming one
+axis cannot change another axis's all-zero status, so a single pass per axis suffices."""
 function clean_coeff(coeff)
-    """Trims trailing all-zero slices (the highest-degree coefficients) along each axis,
-    mirroring the Python yroots Polynomial.clean_coeff. Returns the trimmed array. Never
-    shrinks an axis below length 1. Because only all-zero slices are removed, trimming one
-    axis cannot change another axis's all-zero status, so a single pass per axis suffices."""
     c = coeff
     for ax in 1:ndims(c)
         while size(c, ax) > 1 && all(iszero, selectdim(c, ax, size(c, ax)))
@@ -12,8 +12,8 @@ function clean_coeff(coeff)
     return c
 end
 
+"""Contains the coeffs array for a MultiPower object"""
 struct MultiPower
-    """Contains the coeffs array for a MultiPower object"""
     coeff
     dim
 
@@ -40,8 +40,8 @@ Before this MultiCheb did neither, and was solved transposed -- silently, and on
 MultiPower, so a system mixing the two solved one polynomial against the other's transpose."""
 to_solver_layout(A) = ndims(A) < 2 ? A : permutedims(A, ndims(A):-1:1)
 
+"""Contains the coeffs array for a MultiCheb object"""
 struct MultiCheb
-    """Contains the coeffs array for a MultiCheb object"""
     coeff
     dim
 
@@ -54,22 +54,22 @@ struct MultiCheb
     end
 end
 
+"""" Converts A to an array who's indices match python indices
+    So B[i,j,k,...] would return the same thing as P[i,j,k,...],
+    where P is the python representation of the matrix A 
+"""
 function to_python(A)
-    """" Converts A to an array who's indices match python indices
-        So B[i,j,k,...] would return the same thing as P[i,j,k,...],
-        where P is the python representation of the matrix A 
-    """
     s = size(A)
     dim = length(s)
     B = permutedims(reshape(A,reverse(s)),dim:-1:1)
     return B
 end
 
+"""" Converts A to an array who's indices match python indices
+    So B[i,j,k,...] would return the same thing as P[i,j,k,...],
+    where P is the python representation of the matrix A 
+"""
 function to_julia(A)
-    """" Converts A to an array who's indices match python indices
-        So B[i,j,k,...] would return the same thing as P[i,j,k,...],
-        where P is the python representation of the matrix A 
-    """
 
     s = size(A)
     dim = length(s)
@@ -122,14 +122,14 @@ function eval_MultiPower(multiPower,points)
 
 end
 
-function eval_MultiCheb(multiCheb,points)
-    """ Evaluates a MultiCheb at one or many points.
+""" Evaluates a MultiCheb at one or many points.
 
-        Unlike `eval_MultiPower` there is no permutedims here. `MultiPower.coeff` is stored
-        in `to_julia`'s layout and has to be un-swapped before evaluating; `MultiCheb.coeff`
-        is already the plain reversal (`to_solver_layout`), which is exactly the layout the
-        loop below wants -- axis k of the tensor is variable dim - k + 1, so the axes fall
-        off the end in variable order 1, 2, ... """
+    Unlike `eval_MultiPower` there is no permutedims here. `MultiPower.coeff` is stored
+    in `to_julia`'s layout and has to be un-swapped before evaluating; `MultiCheb.coeff`
+    is already the plain reversal (`to_solver_layout`), which is exactly the layout the
+    loop below wants -- axis k of the tensor is variable dim - k + 1, so the axes fall
+    off the end in variable order 1, 2, ... """
+function eval_MultiCheb(multiCheb,points)
     function chebval(x, cc)
         cc = collect(eachslice(cc,dims=ndims(cc)))
         len = length(cc)
@@ -177,13 +177,13 @@ function eval_MultiCheb(multiCheb,points)
 
 end
 
+""" Takes in a multipower coefficient matrix
+    Returns the chebyshev coefficient matrix """
 function multipower_to_cheb(coeffs)
-    """ Takes in a multipower coefficient matrix
-        Returns the chebyshev coefficient matrix """
+    """ Finds the next transformation coefficients (Bs) from the previous ones (As).
+        So if x^n = sum(As[i]*T_i(x)), x^(n+1) = sum(Bs[i]*T_i(x)).
+    """
     function get_new_As(As)
-        """ Finds the next transformation coefficients (Bs) from the previous ones (As).
-            So if x^n = sum(As[i]*T_i(x)), x^(n+1) = sum(Bs[i]*T_i(x)).
-        """
         n = length(As)
         if n == 0
             return [1.]

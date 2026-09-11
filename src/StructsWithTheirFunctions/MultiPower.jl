@@ -1,17 +1,17 @@
 
 
-function slice_top(matrix_shape)
-    """ Gets the n-d slices needed to slice a matrix into the top corner of another.
+""" Gets the n-d slices needed to slice a matrix into the top corner of another.
 
-    Parameters
-    ----------
-    matrix_shape : tuple.
-        The matrix shape of interest.
-    Returns
-    -------
-    slices : list
-        Each value of the list is a slice of the matrix in some dimension. It is exactly the size of matrix_shape.
-    """
+Parameters
+----------
+matrix_shape : tuple.
+    The matrix shape of interest.
+Returns
+-------
+slices : list
+    Each value of the list is a slice of the matrix in some dimension. It is exactly the size of matrix_shape.
+"""
+function slice_top(matrix_shape)
     slices = []
     for i in matrix_shape
         push!(slices,1:i)
@@ -19,20 +19,20 @@ function slice_top(matrix_shape)
     return slices
 end
 
+"""
+Matches the shape of two matrixes.
+
+Parameters
+----------
+a, b : ndarray
+    Matrixes whose size is to be matched.
+
+Returns
+-------
+a, b : ndarray
+    Matrixes of equal size.
+"""
 function match_size(a,b)
-    """
-    Matches the shape of two matrixes.
-
-    Parameters
-    ----------
-    a, b : ndarray
-        Matrixes whose size is to be matched.
-
-    Returns
-    -------
-    a, b : ndarray
-        Matrixes of equal size.
-    """
     a_shape = size(a)
     b_shape = size(b)
     dim = length(a_shape)
