@@ -85,6 +85,15 @@ function to_julia(A)
 end
 
 
+""" Evaluates a MultiPower at one or many points.
+
+    `points` is either a single point as a length-`dim` vector, or a `dim` x npoints
+    matrix whose columns are the points. A single point returns a scalar; several
+    return a vector.
+
+    `MultiPower.coeff` is stored in `to_julia`'s layout, which swaps the first two
+    axes, so the permutedims below un-swaps them before the Horner sweep. `eval_MultiCheb`
+    needs no such step because `MultiCheb.coeff` is already in the solver layout. """
 function eval_MultiPower(multiPower,points)
     function polyval(x, cc)
         cc = collect(eachslice(cc,dims=ndims(cc)))
