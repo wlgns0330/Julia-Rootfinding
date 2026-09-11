@@ -1120,7 +1120,7 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     #More expensive than constant term check, but testing show it saves time in lower dimensions
     if (solverOptions.low_dim_quadratic_check && ndims(Ms[1]) <= 3) || solverOptions.all_dim_quadratic_check
         for i in eachindex(Ms)
-            if fast_quadraticCheck(Ms[i], errors[i])
+            if quadraticCheck(Ms[i], errors[i])
                 return [], []
             end
         end
