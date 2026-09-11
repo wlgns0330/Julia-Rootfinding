@@ -4,6 +4,7 @@ using Test
 function test_all_Polynomial()
     @testset "All tests in Polynomial.jl" begin
         test_construction()
+        test_eval_MultiPower()
     end
 end
 
@@ -34,7 +35,13 @@ function test_eval_MultiPower()
         MP_1 = MultiPower(arr1)
         points_1 = [4.; 2.5;;5.; 3;;1.0; 1.0;;0.; 0.]
         eval_1 = eval_MultiPower(MP_1, points_1)
-        expected_1 = [767.125, 1696.5, 26.5, 4.0]
+        # Re-derived for this package's convention -- coeff[i,j,...] is the coefficient of
+        # x^(i-1) * y^(j-1) * ..., so axis 1 is the first variable. The values recorded here
+        # previously were the transpose of that (axis 1 read as the second variable), which is
+        # how numpy's row-major display reads the same array in Python yroots. They were never
+        # checked because this whole function was orphaned. Computed by direct summation over
+        # monomials, independently of eval_MultiPower.
+        expected_1 = [1137.625, 2632.5, 26.5, 4.0]
         for (num, exp) in zip(eval_1, expected_1)
             @test isapprox(num,exp)
         end
@@ -43,7 +50,7 @@ function test_eval_MultiPower()
         MP_2 = MultiPower(arr2)
         points_2 = [4.;-2.5;9;;5.;3;1;;-1.0;1.0;1;;0.;0.;0]
         eval_2 = eval_MultiPower(MP_2, points_2)
-        expected_2 = [45260.525, 1494.5, -23.9, 4.0]
+        expected_2 = [15200.525, 6222.5, -15.9, 4.0]
         for (num, exp) in zip(eval_2, expected_2)
             @test isapprox(num,exp)
         end
@@ -70,7 +77,7 @@ function test_eval_MultiPower()
         MP_5 = MultiPower(arr5)
         points_5 = [0;2.1;1.3;-5;;0;0;0;0;;7.9;-4.5;-2.3;-1;;.0000123;-.07673;-.1332453;-.89544412]
         eval_5 = eval_MultiPower(MP_5,points_5)
-        expected_5 = [180910404 3.2124 509.053598 4.32890399]
+        expected_5 = [-91.617648, 3.2124, 0.0, 0.26878374974198127]
         for (num,exp) in zip(eval_5,expected_5)
             @test isapprox(num,exp)
         end

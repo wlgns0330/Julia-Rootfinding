@@ -174,11 +174,15 @@ function eval_MultiPower(multiPower,points)
     end
 
     if size(points)[end-1] != multiPower.dim
-        1/0
+        throw(DimensionMismatch("points has $(size(points)[end-1]) rows but the polynomial is in $(multiPower.dim) variables"))
     end
 
     n = multiPower.dim
-    c = permutedims(multiPower.coeff,(2,1,collect(3:n)...))
+    # `to_julia` swaps the first two axes, so they are swapped back here before the Horner
+    # sweep. In one variable there is no second axis to swap and the permutation (2, 1) is
+    # invalid for a 1-D array, so this threw ArgumentError for every one-variable
+    # MultiPower. eval_MultiCheb has no such step and handled the case already.
+    c = n == 1 ? multiPower.coeff : permutedims(multiPower.coeff,(2,1,collect(3:n)...))
     cc = reshape(c,(ntuple(i->1, ndims(points))..., size(c)...))
     c = polyval(points[1,:],cc)
     for i in 2:n
@@ -187,7 +191,9 @@ function eval_MultiPower(multiPower,points)
     if length(c) == 1
         return c[1]
     else
-        return c
+        # vec, so several points give a Vector rather than the dim x 1 SubArray the
+        # reshaping leaves behind. eval_MultiCheb already returns vec(c) for the same input.
+        return vec(c)
     end
 
 end
