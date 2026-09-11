@@ -4,82 +4,73 @@ include("StructsWithTheirFunctions/Polynomial.jl")
 include("FastSolve/FastCombinedSolver.jl")
 
 
-"""Finds and returns the roots of a system of functions on the search interval [a,b].
+"""
+    solve(funcs, a, b; verbose=false, returnBoundingBoxes=false, exact=false,
+          minBoundingIntervalSize=1e-5, roundoff=53)
 
-Generates an approximation for each function using Chebyshev polynomials on the interval given,
-then uses properties of the approximations to shrink the search interval. When the information
-contained in the approximation is insufficient to shrink the interval further, the interval is
-subdivided into subregions, and the searching function is recursively called until it zeros in
-on each root. A specific point (and, optionally, a bounding box) is returned for each root found.
+Find the roots of a system of functions on the search interval `[a, b]`.
 
-NOTE: YRoots uses just in time compiling, which means that part of the code will not be compiled until
-a system of functions to solve is given (rather than compiling all the code upon importing the module).
-As a result, the very first time the solver is given any system of equations of a particular dimension,
-the module will take several seconds longer to solve due to compiling time. Once the first system of a
-particular dimension has run, however, other systems of that dimension (or even the same system run
-again) will be solved at the normal (faster) speed thereafter.
+Generates a Chebyshev approximation for each function on the given interval, then uses
+properties of those approximations to shrink the search interval. When the information in
+the approximation is insufficient to shrink it further, the interval is subdivided and the
+search recurses until it zeros in on each root. One point -- and optionally a bounding box
+-- is returned per root found.
 
-NOTE: The solve function is only guaranteed to work well on systems of equations where each function
-is continuous and smooth and each root in the interval is a simple root. If a function is not
-continuous and smooth on an interval or an infinite number of roots exist in the interval, the
-solver may get stuck in recursion or the kernel may crash.
+# Arguments
+- `funcs`: Vector of functions to solve simultaneously. Each element is either a callable
+  taking one argument per dimension, or a [`MultiCheb`](@ref) / [`MultiPower`](@ref)
+  polynomial.
+- `a`: Vector holding the lower bound of the search interval in each dimension, in
+  dimension order.
+- `b`: Vector holding the upper bound, likewise.
 
-Examples
---------
+# Keyword arguments
+- `verbose::Bool = false`: Print progress of the approximation and rootfinding to the
+  terminal. Useful for systems that take a long time to solve.
+- `returnBoundingBoxes::Bool = false`: Also return a bounding box for each root.
+- `exact::Bool = false`: Run the transformations on the approximation in higher precision,
+  minimising error at some cost in speed.
+- `minBoundingIntervalSize::Real = 1e-5`: If a root is found whose bounding interval is
+  larger than this in every dimension, the system is solved again on the smaller interval.
+  Smaller values give more accurate roots but increase solve time, and can cause trouble
+  if the functions cannot be evaluated accurately at points close together. The value is
+  absolute while the interval in question lies within `[-1, 1]`, and relative otherwise:
+  for an interval with an endpoint of magnitude greater than 1, it is multiplied by that
+  magnitude in that dimension.
+- `roundoff::Int = 53`: Bits of precision to solve at. `53` selects `Float64` and the fast
+  solver; `<= 24` selects `Float32`, `<= 11` selects `Float16`, and anything above 53
+  switches to `BigFloat` at that precision.
 
->>> f = lambda x,y,z: 2*x**2 / (x**4-4) - 2*x**2 + .5
->>> g = lambda x,y,z: 2*x**2*y / (y**2+4) - 2*y + 2*x*z
->>> h = lambda x,y,z: 2*z / (z**2-4) - 2*z
->>> roots = yroots.solve([f, g, h], np.array([-0.5,0,-2**-2.44]), np.array([0.5,np.exp(1.1376),.8]))
->>> print(roots)
-[[-4.46764373e-01  4.44089210e-16 -5.55111512e-17]
- [ 4.46764373e-01  4.44089210e-16 -5.55111512e-17]]
+# Returns
+A vector of roots, each a point in the search interval. With `returnBoundingBoxes = true`,
+returns `(roots, boundingBoxes)` instead, where each box is a `2 x dim` array whose first
+row holds the lower bound in each dimension and whose second row holds the upper bound.
 
+# Examples
+```julia
+julia> using YRoots
 
+julia> solve([(x, y) -> x + y - 0.3, (x, y) -> x - y - 0.1], [-1.0, -1.0], [1.0, 1.0])
+1-element Vector{Any}:
+ [0.2, 0.09999999999999994]
 
->>> M1 = yroots.MultiPower(np.array([[0,3,0,2],[1.5,0,7,0],[0,0,4,-2],[0,0,0,1]]))
->>> M2 = yroots.MultiCheb(np.array([[0.02,0.31],[-0.43,0.19],[0.06,0]]))
->>> roots = yroots.solve([M1,M2],-5,5)
->>> print(roots)
-[[-0.98956615 -4.12372817]
- [-0.06810064  0.03420242]]
+julia> M1 = MultiPower([0 3 0 2; 1.5 0 7 0; 0 0 4 -2; 0 0 0 1]);
 
-Parameters
-----------
-funcs: list
-    List of functions for searching. NOTE: Valid input is restricted to callable Python functions
-    (including user-created functions) and yroots Polynomial (MultiCheb and MultiPower) objects.
-    String representations of functions are not valid input.
-a: list or numpy array
-    An array containing the lower bound of the search interval in each dimension, listed in
-    dimension order. If the lower bound is to be the same in each dimension, a single float input
-    is also accepted. Defaults to -1 in each dimension if no input is given.
-b: list or numpy array
-    An array containing the upper bound of the search interval in each dimension, listed in
-    dimension order. If the upper bound is to be the same in each dimension, a single float input
-    is also accepted. Defaults to 1 in each dimension if no input is given.
-verbose : bool
-    Defaults to False. Tracks progress of the approximation and rootfinding by outputting progress to
-    the terminal. Useful in tracking progress of systems of equations that take a long time to solve.
-returnBoundingBoxes : bool
-    Defaults to False. Whether or not to return a precise bounding box for each root.
-exact: bool
-    Defaults to False. Whether transformations performed on the approximation should be performed
-    with higher precision to minimize error.
-minBoundingIntervalSize : double
-    Defaults to 1e-5. If a root is found with a bounding interval of size > minBoundingIntervalSize in
-    each dimension, the functions are solved again on the smaller interval. Setting too small could cause
-    issues if the functions can't be evaluated accurately on points close together, and will increase solve
-    times. Should give more accurate roots when smaller. This number is absolute when the boudning interval in
-    question is in [-1,1], and relative otherwise. So if an interval has an endpoint of magnitude > 1, then
-    minBoundingIntervalSize is multipled by that value for that dimension.
+julia> M2 = MultiCheb([0.02 0.31; -0.43 0.19; 0.06 0]);
 
-Returns
--------
-yroots : numpy array
-    A list of the roots of the system of functions on the interval.
-boundingBoxes : numpy array (optional)
-    The exact intervals (boxes) in which each root is bound to lie.
+julia> solve([M1, M2], [-5.0, -5.0], [5.0, 5.0]);
+```
+
+!!! note "First solve of a given dimension"
+    The solver is specialised on the dimension of the system. Dimensions 1 through 5 are
+    precompiled when the package is installed, so their first solve returns promptly; a
+    higher dimension pays a one-off compilation cost of several seconds on its first call.
+
+!!! warning "Requirements on the input"
+    `solve` is only guaranteed to work well when every function is continuous and smooth
+    on the search interval and every root in it is simple. A function that is not smooth,
+    or an interval containing infinitely many roots, may drive the solver into deep
+    subdivision; it will give up at `maxLevel` and report a wide bounding box.
 """
 function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=1e-5, roundoff=53)
     dim = length(funcs)
