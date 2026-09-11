@@ -12,7 +12,30 @@ function clean_coeff(coeff)
     return c
 end
 
-"""Contains the coeffs array for a MultiPower object"""
+"""
+    MultiPower(coeff; clean_zeros=true)
+
+A polynomial in the power basis, wrapping its coefficient array so it can be passed
+straight to [`solve`](@ref) instead of being approximated from a callable.
+
+`coeff[i, j, ...]` is the coefficient of `x^(i-1) * y^(j-1) * ...`, so `coeff[1, 1]` is
+the constant term. The number of axes is the number of variables, available afterwards as
+the `dim` field.
+
+`clean_zeros=true` trims trailing all-zero slices, so a padded array does not inflate the
+reported degree. Pass `false` to keep the array's shape as given.
+
+# Examples
+```julia
+julia> p = MultiPower([1.0 0.0; 2.0 3.0]);   # 1 + 2x + 3xy
+
+julia> p.dim
+2
+
+julia> eval_MultiPower(p, [0.5, 0.3])
+2.45
+```
+"""
 struct MultiPower
     coeff
     dim
@@ -40,7 +63,32 @@ Before this MultiCheb did neither, and was solved transposed -- silently, and on
 MultiPower, so a system mixing the two solved one polynomial against the other's transpose."""
 to_solver_layout(A) = ndims(A) < 2 ? A : permutedims(A, ndims(A):-1:1)
 
-"""Contains the coeffs array for a MultiCheb object"""
+"""
+    MultiCheb(coeff; clean_zeros=true)
+
+A polynomial in the Chebyshev basis, wrapping its coefficient array so it can be passed
+straight to [`solve`](@ref) instead of being approximated from a callable.
+
+`coeff[i, j, ...]` is the coefficient of `T_(i-1)(x) * T_(j-1)(y) * ...`, where `T_n` is
+the Chebyshev polynomial of the first kind, so `coeff[1, 1]` is the constant term. The
+number of axes is the number of variables, available afterwards as the `dim` field.
+
+`clean_zeros=true` trims trailing all-zero slices, so a padded array does not inflate the
+reported degree. Pass `false` to keep the array's shape as given.
+
+# Examples
+```julia
+julia> p = MultiCheb([0.0, 0.0, 1.0]);       # T2(x) = 2x^2 - 1
+
+julia> eval_MultiCheb(p, [0.5])
+-0.5
+
+julia> q = MultiCheb([1.0 0.0; 0.0 2.0]);    # 1 + 2*T1(x)*T1(y)
+
+julia> eval_MultiCheb(q, [0.5, 0.3])
+1.3
+```
+"""
 struct MultiCheb
     coeff
     dim
@@ -85,15 +133,28 @@ function to_julia(A)
 end
 
 
-""" Evaluates a MultiPower at one or many points.
+"""
+    eval_MultiPower(multiPower, points)
 
-    `points` is either a single point as a length-`dim` vector, or a `dim` x npoints
-    matrix whose columns are the points. A single point returns a scalar; several
-    return a vector.
+Evaluate a [`MultiPower`](@ref) at one point or at many.
 
-    `MultiPower.coeff` is stored in `to_julia`'s layout, which swaps the first two
-    axes, so the permutedims below un-swaps them before the Horner sweep. `eval_MultiCheb`
-    needs no such step because `MultiCheb.coeff` is already in the solver layout. """
+`points` is either a single point as a length-`dim` vector, or a `dim x npoints` matrix
+whose columns are the points. A single point returns a scalar; several return one value
+per column.
+
+# Examples
+```julia
+julia> p = MultiPower([1.0 0.0; 2.0 3.0]);   # 1 + 2x + 3xy
+
+julia> eval_MultiPower(p, [0.5, 0.3])
+2.45
+```
+
+!!! warning "One-dimensional MultiPower"
+    This does not currently work for a `MultiPower` in a single variable: it throws
+    `ArgumentError: no valid permutation of dimensions`. `eval_MultiCheb` handles the
+    one-variable case correctly.
+"""
 function eval_MultiPower(multiPower,points)
     function polyval(x, cc)
         cc = collect(eachslice(cc,dims=ndims(cc)))
@@ -131,13 +192,28 @@ function eval_MultiPower(multiPower,points)
 
 end
 
-""" Evaluates a MultiCheb at one or many points.
+"""
+    eval_MultiCheb(multiCheb, points)
 
-    Unlike `eval_MultiPower` there is no permutedims here. `MultiPower.coeff` is stored
-    in `to_julia`'s layout and has to be un-swapped before evaluating; `MultiCheb.coeff`
-    is already the plain reversal (`to_solver_layout`), which is exactly the layout the
-    loop below wants -- axis k of the tensor is variable dim - k + 1, so the axes fall
-    off the end in variable order 1, 2, ... """
+Evaluate a [`MultiCheb`](@ref) at one point or at many.
+
+`points` is either a single point as a length-`dim` vector, or a `dim x npoints` matrix
+whose columns are the points. A single point returns a scalar; several return a vector of
+values, one per column.
+
+# Examples
+```julia
+julia> p = MultiCheb([0.0, 0.0, 1.0]);       # T2(x) = 2x^2 - 1
+
+julia> eval_MultiCheb(p, [0.5])
+-0.5
+
+julia> eval_MultiCheb(p, [0.5 0.1])
+2-element Vector{Float64}:
+ -0.5
+ -0.98
+```
+"""
 function eval_MultiCheb(multiCheb,points)
     function chebval(x, cc)
         cc = collect(eachslice(cc,dims=ndims(cc)))
