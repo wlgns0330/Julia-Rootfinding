@@ -1,0 +1,202 @@
+/* jroots docs -- the design tokens of the project landing page, applied over
+ * Documenter's own theme.
+ *
+ * Documenter emits user assets after its theme stylesheets, so these rules win
+ * on equal specificity. The light theme's rules are unscoped, but the dark
+ * theme's are scoped under html.theme--documenter-dark, so anything inside the
+ * page is matched through #documenter (an id outranks those two classes) and
+ * the few html/body rules are marked important. That way the site reads the
+ * same whichever theme Documenter picks for the visitor. The ids are doubled
+ * (#documenter#documenter) purely to raise specificity: the dark theme's own
+ * rules are html.theme--documenter-dark #documenter …, which a single id loses
+ * to. Same element, one more id. */
+
+:root{
+  --ink:#0E1420;
+  --panel:#161D2C;
+  --panel-2:#1B2338;
+  --paper:#EDEAE0;
+  --paper-dim:#C9C4B4;
+  --muted:#7C879C;
+  --hair:#2A3350;
+  --accent-y:#E8A33D;
+  --accent-j:#4FB6C9;
+  --accent: var(--accent-j);
+  --code-bg:#0B0F19;
+  --mono:'IBM Plex Mono', ui-monospace, monospace;
+  --sans:'IBM Plex Sans', system-ui, sans-serif;
+  --serif:'Newsreader', Georgia, serif;
+}
+
+html, html body{
+  background:var(--ink) !important;
+  color:var(--paper) !important;
+  font-family:var(--sans) !important;
+}
+
+/* ---------- sidebar ---------- */
+#documenter#documenter .docs-sidebar{
+  background:var(--ink);
+  border-right:1px solid var(--hair);
+  box-shadow:none;
+}
+#documenter#documenter .docs-sidebar .docs-logo{padding-top:26px;}
+#documenter#documenter .docs-sidebar .docs-logo > img{max-height:34px;}
+#documenter#documenter .docs-sidebar .docs-package-name{
+  font-family:var(--mono); font-size:15px; letter-spacing:.02em;
+  border-bottom:1px solid var(--hair); padding-bottom:16px; margin-bottom:6px;
+}
+#documenter#documenter .docs-sidebar .docs-package-name a,
+#documenter#documenter .docs-sidebar .docs-package-name a:hover{color:var(--paper); font-weight:600;}
+#documenter#documenter .docs-sidebar .docs-search-query{
+  background:var(--panel); border:1px solid var(--hair); border-radius:6px;
+  color:var(--muted); font-family:var(--mono); font-size:12.5px;
+}
+#documenter#documenter .docs-sidebar .docs-search-query:hover{border-color:var(--accent); color:var(--paper-dim);}
+#documenter#documenter .docs-sidebar .docs-menu{margin-top:6px;}
+#documenter#documenter .docs-sidebar .docs-menu .tocitem,
+#documenter#documenter .docs-sidebar .docs-menu a.tocitem{
+  background:transparent; border:0; border-left:1px solid var(--hair); border-radius:0;
+  color:var(--paper-dim); font-family:var(--mono); font-size:12.5px; font-weight:500;
+  line-height:1.45; padding:7px 0 7px 14px; box-shadow:none;
+}
+#documenter#documenter .docs-sidebar .docs-menu span.tocitem{
+  border-left:0; color:var(--muted); font-size:11px;
+  letter-spacing:.14em; text-transform:uppercase; padding-left:0; margin-top:20px;
+}
+#documenter#documenter .docs-sidebar .docs-menu a.tocitem:hover{
+  background:transparent; color:var(--accent); border-left-color:var(--accent);
+}
+#documenter#documenter .docs-sidebar .docs-menu li.is-active > a.tocitem,
+#documenter#documenter .docs-sidebar .docs-menu li.is-active{
+  background:transparent; border:0; box-shadow:none;
+  color:var(--accent); border-left-color:var(--accent);
+}
+#documenter#documenter .docs-sidebar .docs-menu li.is-active > a.tocitem{border-left:1px solid var(--accent);}
+#documenter#documenter .docs-sidebar .docs-menu ul.internal a.tocitem{
+  background:transparent; color:var(--muted); font-size:12px; padding-left:26px;
+}
+#documenter#documenter .docs-sidebar .docs-menu ul.internal a.tocitem:hover{color:var(--accent);}
+#documenter#documenter .docs-sidebar .docs-version-selector{border-top:1px solid var(--hair);}
+
+/* ---------- top bar ---------- */
+#documenter#documenter .docs-main > header.docs-navbar{
+  background:rgba(14,20,32,.86);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--hair);
+  box-shadow:none;
+}
+#documenter#documenter .docs-navbar .breadcrumb a,
+#documenter#documenter .docs-navbar .breadcrumb li.is-active a,
+#documenter#documenter .docs-navbar .breadcrumb li + li::before{
+  color:var(--paper-dim); font-family:var(--mono); font-size:13px;
+}
+#documenter#documenter .docs-navbar .breadcrumb a.is-disabled{color:var(--muted);}
+#documenter#documenter .docs-navbar .breadcrumb a:hover{color:var(--accent);}
+#documenter#documenter .docs-navbar .docs-right .docs-navbar-link{color:var(--paper-dim); font-family:var(--mono); font-size:13px;}
+#documenter#documenter .docs-navbar .docs-right .docs-navbar-link:hover{color:var(--accent);}
+
+/* ---------- body copy ---------- */
+#documenter#documenter .docs-main{color:var(--paper);}
+#documenter#documenter .content h1, #documenter#documenter .content h2,
+#documenter#documenter .content h3, #documenter#documenter .content h4{
+  font-family:var(--serif); font-weight:500; letter-spacing:-.01em; color:var(--paper);
+}
+#documenter#documenter .content h1{font-size:clamp(32px,4.4vw,46px); line-height:1.06;}
+#documenter#documenter .content h2{
+  font-size:27px; line-height:1.15; border-bottom:1px solid var(--hair); padding-bottom:10px;
+}
+#documenter#documenter .content h3{font-size:20px;}
+#documenter#documenter .content p, #documenter#documenter .content li{color:var(--paper-dim); line-height:1.7;}
+#documenter#documenter .content strong{color:var(--paper);}
+#documenter#documenter .content a{color:var(--accent);}
+#documenter#documenter .content a:hover{color:var(--accent); text-decoration:underline;}
+#documenter#documenter .content hr{background:var(--hair); border:0; height:1px;}
+#documenter#documenter .content a.docs-heading-anchor,
+#documenter#documenter .content a.docs-heading-anchor:hover{color:inherit; text-decoration:none;}
+#documenter#documenter .docs-heading-anchor-permalink{color:var(--muted);}
+
+/* ---------- code ---------- */
+#documenter#documenter .content code, #documenter#documenter .content pre{font-family:var(--mono);}
+#documenter#documenter .content code{
+  background:var(--panel); border:1px solid var(--hair); border-radius:4px;
+  color:var(--accent); font-size:12.5px; padding:1px 5px;
+}
+#documenter#documenter .content pre{
+  background:var(--code-bg); border:1px solid var(--hair); border-radius:8px;
+  color:#D7DCEA; font-size:12.5px; line-height:1.7; padding:16px 18px;
+}
+#documenter#documenter .content pre code{
+  background:transparent; border:0; color:inherit; font-size:inherit; padding:0;
+}
+
+/* ---------- docstrings ---------- */
+#documenter#documenter .docstring{
+  background:var(--panel-2); border:1px solid var(--hair); border-radius:8px;
+  box-shadow:none; margin:26px 0;
+}
+#documenter#documenter .docstring > summary{
+  background:var(--panel); border-bottom:1px solid var(--hair);
+  border-left:3px solid var(--accent); border-radius:8px 8px 0 0;
+  font-family:var(--mono); font-size:13px; padding:12px 16px;
+}
+#documenter#documenter .docstring > summary code, #documenter#documenter .docstring .docstring-binding code{
+  background:transparent; border:0; color:var(--accent); font-weight:600; padding:0;
+}
+#documenter#documenter .docstring .docstring-category{
+  color:var(--muted); font-family:var(--mono); font-size:11px;
+  letter-spacing:.14em; text-transform:uppercase;
+}
+#documenter#documenter .docstring > section{border-left:3px solid var(--hair); padding:18px 16px 6px;}
+#documenter#documenter .docstring > section > :last-child{margin-bottom:0;}
+#documenter#documenter .docstring .docstring-article-toggle-button{color:var(--muted);}
+#documenter#documenter .docstring a.docs-sourcelink{
+  background:transparent; border:1px solid var(--hair); border-radius:4px;
+  color:var(--muted); font-family:var(--mono); font-size:11px;
+  letter-spacing:.06em; text-transform:uppercase;
+}
+#documenter#documenter .docstring a.docs-sourcelink:hover{border-color:var(--accent); color:var(--accent);}
+
+/* ---------- admonitions ---------- */
+#documenter#documenter .content .admonition{
+  background:var(--panel); border:1px solid var(--hair); border-radius:6px; box-shadow:none;
+}
+#documenter#documenter .content .admonition > .admonition-header{
+  background:transparent; border-bottom:1px solid var(--hair);
+  color:var(--accent); font-family:var(--mono); font-size:11px;
+  letter-spacing:.14em; text-transform:uppercase;
+}
+#documenter#documenter .content .admonition > .admonition-body{color:var(--paper-dim);}
+#documenter#documenter .content .admonition.is-info > .admonition-header{color:var(--accent-j);}
+#documenter#documenter .content .admonition.is-warning > .admonition-header,
+#documenter#documenter .content .admonition.is-danger > .admonition-header{color:var(--accent-y);}
+
+/* ---------- tables ---------- */
+#documenter#documenter .content table td, #documenter#documenter .content table th{
+  background:transparent; border:1px solid var(--hair); color:var(--paper-dim);
+}
+#documenter#documenter .content table th{
+  background:var(--panel); color:var(--paper);
+  font-family:var(--mono); font-size:11.5px; letter-spacing:.06em; text-transform:uppercase;
+}
+
+/* ---------- page footer ---------- */
+#documenter#documenter .docs-footer{
+  background:transparent; border-top:1px solid var(--hair); margin-top:52px; padding-top:26px;
+}
+#documenter#documenter .docs-footer .docs-footer-prevpage,
+#documenter#documenter .docs-footer .docs-footer-nextpage{
+  color:var(--paper-dim); font-family:var(--mono); font-size:12.5px;
+}
+#documenter#documenter .docs-footer .docs-footer-prevpage:hover,
+#documenter#documenter .docs-footer .docs-footer-nextpage:hover{color:var(--accent);}
+#documenter#documenter .docs-footer .footer-message{color:var(--muted); font-family:var(--mono); font-size:12px;}
+#documenter#documenter .docs-footer .footer-message a{color:var(--paper-dim);}
+#documenter#documenter .docs-footer .footer-message a:hover{color:var(--accent);}
+
+/* ---------- settings modal ---------- */
+#documenter-settings#documenter-settings .modal-card-head, #documenter-settings#documenter-settings .modal-card-foot{
+  background:var(--panel); border-color:var(--hair);
+}
+#documenter-settings#documenter-settings .modal-card-body{background:var(--panel-2); color:var(--paper-dim);}
+#documenter-settings#documenter-settings .modal-card-title, #documenter-settings#documenter-settings .label{color:var(--paper);}

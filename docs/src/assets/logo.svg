@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="34" viewBox="0 0 120 34" role="img" aria-label="jroots">
+  <path d="M3 24 Q11 4 17 17 T33 9" fill="none" stroke="#4FB6C9" stroke-width="3.2" stroke-linecap="round"/>
+  <circle cx="13.2" cy="16.8" r="3.4" fill="#EDEAE0"/>
+  <text x="42" y="24" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="18" font-weight="600" fill="#EDEAE0">jroots</text>
+</svg>
