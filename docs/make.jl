@@ -1,14 +1,22 @@
 using Documenter
 using YRoots
 
+# Built by GitHub Actions, GITHUB_REPOSITORY names the repository publishing the
+# site, so the links below follow this repository wherever it lives -- here or
+# upstream -- without being edited. Both carry the same repository name; only
+# the owner differs. The fallback keeps a local build pointing somewhere real.
+repository = get(ENV, "GITHUB_REPOSITORY", "wlgns0330/Julia-Rootfinding")
+repo_owner = split(repository, '/')[1]
+repo_name  = split(repository, '/')[2]
+
 makedocs(
     sitename = "YRoots.jl",
     authors  = "BYU Math",
     modules  = [YRoots],
     format   = Documenter.HTML(
         prettyurls = get(ENV, "CI", "false") == "true",
-        canonical  = "https://wlgns0330.github.io/Julia-Rootfinding",
-        repolink   = "https://github.com/wlgns0330/Julia-Rootfinding",
+        canonical  = "https://$(repo_owner).github.io/$(repo_name)",
+        repolink   = "https://github.com/$(repository)",
         # Set explicitly: Documenter shells out to `git remote` to infer this and, when
         # that fails (as it does in a fresh CI checkout), silently defaults to "master".
         # This repository's default branch is main, so every "Edit on GitHub" link would
@@ -27,11 +35,11 @@ makedocs(
             ),
             "assets/jroots.css",
         ],
-        footer = "Part of the [yroots project](https://wlgns0330.github.io/RootFinding/) · " *
-                 "[Source](https://github.com/wlgns0330/Julia-Rootfinding) · " *
+        footer = "Part of the [yroots project](https://$(repo_owner).github.io/RootFinding/) · " *
+                 "[Source](https://github.com/$(repository)) · " *
                  "[Paper (arXiv)](https://arxiv.org/abs/2401.02114)",
     ),
-    repo = "https://github.com/wlgns0330/Julia-Rootfinding/blob/{commit}{path}#{line}",
+    repo = "https://github.com/$(repository)/blob/{commit}{path}#{line}",
     pages = [
         "Home"        => "index.md",
         "solve"       => "solve.md",
