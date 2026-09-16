@@ -130,6 +130,43 @@ html, html body{
   background:transparent; border:0; color:inherit; font-size:inherit; padding:0;
 }
 
+/* ---------- syntax highlighting ---------- */
+/* Documenter ships two highlight.js palettes and picks between them from the
+ * visitor's theme preference. Its light palette is #880000 on near-white,
+ * which lands at 1.9:1 against the dark code background above -- so with the
+ * background pinned, the palette has to be pinned too. This is Documenter's
+ * own dark (a11y-dark) palette, applied to every visitor. */
+#documenter#documenter .hljs-comment,
+#documenter#documenter .hljs-quote{color:#d4d0ab;}
+#documenter#documenter .hljs-variable,
+#documenter#documenter .hljs-template-variable,
+#documenter#documenter .hljs-tag,
+#documenter#documenter .hljs-name,
+#documenter#documenter .hljs-selector-id,
+#documenter#documenter .hljs-selector-class,
+#documenter#documenter .hljs-regexp,
+#documenter#documenter .hljs-deletion{color:#ffa07a;}
+#documenter#documenter .hljs-number,
+#documenter#documenter .hljs-built_in,
+#documenter#documenter .hljs-literal,
+#documenter#documenter .hljs-type,
+#documenter#documenter .hljs-params,
+#documenter#documenter .hljs-meta,
+#documenter#documenter .hljs-link{color:#f5ab35;}
+#documenter#documenter .hljs-attribute{color:#ffd700;}
+#documenter#documenter .hljs-string,
+#documenter#documenter .hljs-symbol,
+#documenter#documenter .hljs-bullet,
+#documenter#documenter .hljs-addition{color:#abe338;}
+#documenter#documenter .hljs-title,
+#documenter#documenter .hljs-section{color:#00e0e0;}
+#documenter#documenter .hljs-keyword,
+#documenter#documenter .hljs-selector-tag{color:#dcc6e0; font-weight:600;}
+#documenter#documenter .hljs-subst{color:#f8f8f2;}
+#documenter#documenter .hljs-emphasis{font-style:italic;}
+#documenter#documenter .hljs-strong{font-weight:700;}
+#documenter#documenter .content pre code.hljs{color:#D7DCEA; background:transparent;}
+
 /* ---------- docstrings ---------- */
 #documenter#documenter .docstring{
   background:var(--panel-2); border:1px solid var(--hair); border-radius:8px;
