@@ -46,6 +46,7 @@ function test_all_SolveApi()
         test_solve_boundingBoxes()
         test_solve_options()
         test_solve_accuracy()
+        test_solve_scaleInvariance()
         test_solve_doesNotModifyInputs()
     end
 end
@@ -225,6 +226,33 @@ function test_solve_accuracy()
         @test length(roots) > 1
         for i in 1:length(roots), j in (i + 1):length(roots)
             @test maximum(abs.(roots[i] .- roots[j])) > 1e-6
+        end
+    end
+end
+
+function test_solve_scaleInvariance()
+    @testset "solve is invariant to scaling the system" begin
+        # Multiplying every equation by a constant does not move the roots, so the solver's
+        # answer should not move either. It used to: several tolerances were absolute multiples
+        # of machine epsilon (getFinalDegree's noise floor, getApproxError's returned floor, and
+        # trimMs's absApproxTol), which is only the right scale for a system whose values are of
+        # order 1. Scaled far enough down, those floors swamped the coefficients they were meant
+        # to sit beneath -- the measured decay rate fell below 1, the error bound came out
+        # negative, and the solver was handed an inverted interval and threw ArgumentError from
+        # about 1e-20 down. Each of those floors is now relative, or gone.
+        f0 = (x, y) -> y - x^2
+        g0 = (x, y) -> y - x^3 + 0.5 * x
+        a, b = [-1.0, -1.0], [1.0, 1.0]
+        reference = sort(YRoots.solve([f0, g0], a, b), by = p -> (p[1], p[2]))
+        @test length(reference) == 2
+        for scale in (1e6, 1e-5, 1e-10, 1e-20, 1e-30)
+            f = (x, y) -> scale * f0(x, y)
+            g = (x, y) -> scale * g0(x, y)
+            roots = sort(YRoots.solve([f, g], a, b), by = p -> (p[1], p[2]))
+            @test length(roots) == length(reference)
+            for (r, ref) in zip(roots, reference)
+                @test maximum(abs.(r .- ref)) < 1e-14
+            end
         end
     end
 end

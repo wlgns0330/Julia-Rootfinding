@@ -85,16 +85,33 @@ function test_getFinalDegree()
         tol4 = 0.0001
         degree4 = 1
         epsval4 = 0.0004
-        rho4 = 0.707106781186547572737310929369
+        # Every coefficient here is the same, so the series shows no decay whatsoever. The raw
+        # ratio gives rho = sqrt(1/2) = 0.7071, which is not a rate of convergence at all: a rho
+        # below 1 says the coefficients grow, and getApproxError's geometric sum 1/(rho-1) then
+        # comes out NEGATIVE, i.e. an error bound claiming the approximation is better than exact.
+        # getFinalDegree now holds rho at the slowest rate that still yields a finite, positive
+        # bound. The resulting 1/(rho-1) is about 4.5e15 -- an enormous bound, which is the honest
+        # report for coefficients that never converged.
+        rho4 = 1 + 2.0^-52
         expected_outputs4 = [degree4;epsval4;rho4]
         degree4o, epsval4o, rho4o = getFinalDegree(coeff4, tol4)
         @test isapprox(expected_outputs4, [degree4o;epsval4o;rho4o])
+        # isapprox's default tolerance cannot tell 1 + 2^-52 from 1, and a rho of exactly 1 is a
+        # division by zero downstream, so pin the clamped value exactly.
+        @test rho4o === 1 + 2.0^-52
         # Test 5
         coeff5 = [4;3;4;1;0.1;0.1;0;0;0]
         tol5 = 0.02
         degree5 = 5
-        epsval5 = 4.440892098500626e-16
-        rho5 = 456.1401436878536
+        # The tail coefficients are exactly 0, so epsval is set by the noise floor alone. The
+        # largest coefficient is 4, and rounding in computing coefficients of that size leaves
+        # noise around macheps*4, not a bare macheps -- so the floor is 2*macheps*peak = 8*macheps
+        # rather than the old absolute 2*macheps. Scale this coefficient vector by any factor and
+        # epsval, and with it the reported error, now scales by the same factor.
+        epsval5 = 8 * 2.0^-52
+        # A larger epsval means a smaller inferred decay rate: the old 456 claimed the tail decays
+        # faster than the noise floor can actually resolve. degree - maxspot + 2 = 5 - 1 + 2 = 6.
+        rho5 = (4 / epsval5)^(1/6)
         degree5o, epsval5o, rho5o = getFinalDegree(coeff5, tol5)
         @test isapprox(epsval5o, epsval5)
         @test isapprox(rho5o, rho5)
@@ -259,19 +276,28 @@ function test_getApproxError()
         epsilons3 = [epsval1; epsval2; epsval3; epsval4; epsval5; epsval6]
         rhos3 = [rho1; rho2; rho3; rho4; rho5; rho6]
         # rho4 is 0.707 -- below 1, i.e. the coefficients in that dimension were not converging,
-        # so the geometric-sum formula contributes 1/(rho-1) < 0 and the raw sum comes out
-        # negative (-0.8798...). getApproxError floors its result at macheps, which the Python
-        # implementation this was ported from does not do. The floor is kept: this value is used
-        # as an approximation error bound by the solver, and a negative bound would make it
-        # discard regions it should search.
-        expected_approx_error3 = 2.0^-52
+        # so the geometric-sum formula would contribute 1/(rho-1) < 0 and the raw sum would come
+        # out negative (-0.8798...). A negative error bound would have the solver discard regions
+        # it should search, so that has to be prevented -- but flooring the finished sum at
+        # macheps was the wrong place to do it: it turned "this dimension did not converge" into
+        # a reported error of 2.2e-16, i.e. a claim of near-perfect accuracy. That is the unsafe
+        # direction. getApproxError now clamps each rho to just above 1 as it consumes it, which
+        # makes 1/(rho-1) enormous instead of negative, so a non-converging dimension reports an
+        # enormous bound. getFinalDegree can no longer emit a rho <= 1, so this only guards
+        # direct callers such as this test.
+        expected_approx_error3 = 1.50314012323124e15
         @test isapprox(getApproxError(degs3, epsilons3, rhos3), expected_approx_error3)
         degs4 = [degree5]
         epsilons4 = [epsval5]
         rhos4 = [rho5]
-        # Raw sum here is 4.0004e-28, below macheps, so the same floor applies. Reporting an
-        # error bound smaller than machine epsilon would claim a precision that does not exist.
-        expected_approx_error4 = 2.0^-52
+        # The raw sum here is 4.0004e-28, and it is now returned as-is rather than floored at
+        # macheps. The old floor rested on the idea that an error bound below machine epsilon
+        # claims a precision that does not exist -- true only for a function whose values are of
+        # order 1. Here the coefficients themselves are 4e-24, so the function is of that size and
+        # 4e-28 is an ordinary relative accuracy of about 1e-4. Flooring it at 2.2e-16 would
+        # report an error bound twelve orders of magnitude larger than the function it bounds,
+        # which makes the solver's interval arithmetic meaningless.
+        expected_approx_error4 = 4e-24 / (rho5 - 1)
         @test isapprox(getApproxError(degs4, epsilons4, rhos4), expected_approx_error4)
     end
 end
@@ -362,8 +388,10 @@ function test_getChebyshevDegrees()
         a2 = [-1; -4.3]
         b2 = [1.2; 1]
         expected_cheb_degs2 = [1; 18]
-        expected_epsilons2 = [0.00000000000000012262;0.00000000000000017282]
-        expected_rhos2 = [29553589.39768910408020019531;6.23400338296594114240]
+        # epsilons and rhos both move with getFinalDegree's relative noise floor. These values
+        # agree with the Python implementation to the last digit printed.
+        expected_epsilons2 = [1.72250667125853e-16; 2.4860741681031556e-16]
+        expected_rhos2 = [4.745313281212578e7; 6.427289812535059]
         cheb_degs2, epsilons2, rhos2 = getChebyshevDegrees(f2, a2, b2, relApproxTol)
         @test isapprox(expected_cheb_degs2, cheb_degs2)
         @test isapprox(expected_epsilons2, epsilons2;atol=2^-51)
@@ -371,12 +399,19 @@ function test_getChebyshevDegrees()
         f3 = (x, y, z) -> 2 * cos(2 * x) + y * sin(y) + z
         a3 = [-10; -3; -4.3]
         b3 = [5; 2.3; 11/9]
-        expected_cheb_degs3 = [41; 19; 1]
-        expected_epsilons3 = [0.00000000000000044409;0.00000000000000044409;0.00000000000000044409]
-        expected_rhos3 = [2.21262070397888654938;5.36461543633617488069;18000313.87051392346620559692]
+        # The old expected epsilons were all exactly 2*macheps: every dimension was pinned to the
+        # absolute floor, which is why they were identical despite the three dimensions behaving
+        # quite differently. With the floor taken relative to each dimension's largest averaged
+        # coefficient they separate, and dimension 2 keeps one more coefficient (20, not 19).
+        # Python reports the same degrees, the same dimension-2 epsilon and rho to the last digit,
+        # and agrees on dimensions 1 and 3 to about 1%; that residual is pre-existing FFT/ordering
+        # noise between the two languages, not an effect of this change.
+        expected_cheb_degs3 = [41; 20; 1]
+        expected_epsilons3 = [6.039948846877454e-17; 7.686211676761757e-17; 8.923054546214647e-17]
+        expected_rhos3 = [2.3202587723203254; 5.383600770529424; 4.0156736844924405e7]
         cheb_degs3, epsilons3, rhos3 = getChebyshevDegrees(f3, a3, b3, relApproxTol)
         @test isapprox(expected_cheb_degs3, cheb_degs3)
-        @test isapprox(expected_epsilons3, epsilons3;atol=1e-16)
+        @test isapprox(expected_epsilons3, epsilons3)
         @test isapprox(expected_rhos3, rhos3)
         # f4 = (x1, x2, x3, x4) -> 1 + 7 * sin(1 / (13 * x2)) + 7 * x3 + x4
         # a4 = [-10; 7e-5; -4.3; -2]
