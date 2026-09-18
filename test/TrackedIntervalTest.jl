@@ -26,6 +26,7 @@ function test_all_TrackedInterval()
         setupTrackedIntervalGlobals()
         test_copyInterval()
         test_addTransform()
+        test_constructorDoesNotAlias()
         test_getIntervalForCombining()
         test_isPoint()
         test_getFinalInterval()
@@ -73,6 +74,28 @@ function test_copyInterval()
         @test copiedInterval_3.preFinalTransforms == [[1;2;;-1;1;;-3;2]]
 
 
+    end
+end
+
+function test_constructorDoesNotAlias()
+    @testset "TrackedInterval constructor aliasing unit tests" begin
+        # addTransform rewrites `interval` elementwise. If the constructor stored the caller's
+        # array directly, that write would reach back out through the argument; if it stored the
+        # same array in both `interval` and `topInterval`, it would also destroy the original box
+        # that getFinalInterval rebuilds the answer from. Both fields therefore get their own copy.
+        original = [-1.;2;;-1;1]
+        trackedInterval = TrackedInterval(original)
+        addTransform(trackedInterval, [-0.5;1.5;;-0.5;0.5])
+        # The caller's array is untouched.
+        @test original == [-1.;2;;-1;1]
+        # topInterval still holds the box we started from, not the transformed one.
+        @test trackedInterval.topInterval == [-1.;2;;-1;1]
+        # ...and interval did move, so the test above is not passing for want of a transform.
+        @test trackedInterval.interval != [-1.;2;;-1;1]
+        # The three arrays are distinct objects, not three names for one.
+        @test trackedInterval.interval !== trackedInterval.topInterval
+        @test trackedInterval.interval !== original
+        @test trackedInterval.topInterval !== original
     end
 end
 

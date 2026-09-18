@@ -50,7 +50,13 @@ mutable struct TrackedInterval
     root # = [] (by default)
     function TrackedInterval(interval)
         ndim = Int(length(interval)/2)
-        new(interval,interval,[],ndim,false,false,false,[],false,fill(type(0.0394555475981047),ndim),[],[],[],[],[], 1, 0, false,[])
+        # Both fields get their own copy. addTransform rewrites `interval` elementwise in place,
+        # so sharing one array with `topInterval` would destroy the original box that
+        # getFinalInterval rebuilds the answer from, and sharing with the caller's array would
+        # mutate an argument the caller still owns. FastTrackedInterval already copies twice.
+        # The solver happens to call copyInterval on entry, so this closes a trap rather than
+        # fixing a live fault -- but nothing in the type's own interface enforced that.
+        new(copy(interval),copy(interval),[],ndim,false,false,false,[],false,fill(type(0.0394555475981047),ndim),[],[],[],[],[], 1, 0, false,[])
     end
 end
 
