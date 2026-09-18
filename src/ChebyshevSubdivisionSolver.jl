@@ -925,7 +925,8 @@ relApproxTol : double
 absApproxTol : double
     The absolute error increase allowed
 """
-function trimMs(Ms, errors, relApproxTol=type(1e-3), absApproxTol=type(2)^-(precision-1))
+# See fast_trimMs: an absolute allowance trims real information out of small-valued functions.
+function trimMs(Ms, errors, relApproxTol=type(1e-3), absApproxTol=type(0))
     dim = ndims(Ms[1])
     buf = eltype(Ms[1])[]
     for polyNum in 1:dim #Loop through the polynomials

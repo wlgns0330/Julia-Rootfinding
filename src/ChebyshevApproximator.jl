@@ -40,7 +40,13 @@ function getApproxError(degs, epsilons, rhos, macheps=2^-52)
             if Bool(used)
                 # multiply by infinite sum of coeffs past the degree at which the approx stops in dim i
                 #1/rhos[i] is the rate, so this is (1/rhos[i]) / (1 - 1/rhos[i]) = 1/(rhos[i]-1)
-                s /= (rhos[i] - 1)
+                # A rho of 1 or less means the coefficients in this dimension were not
+                # converging, so the geometric sum does not converge either and 1/(rho-1) comes
+                # out negative -- an error bound below zero, which would have the solver discard
+                # regions it should search. Clamping to just above 1 makes the bound enormous
+                # instead, which is the honest report for an approximation that did not converge.
+                # getFinalDegree cannot produce such a rho any more; this guards direct callers.
+                s /= (max(rhos[i], one(rhos[i]) + macheps) - 1)
                 # The points in this section are going to be < max(epsilons[i] that contribute to it)
                 thisEps = max(thisEps, epsilons[i])
             else
@@ -53,7 +59,13 @@ function getApproxError(degs, epsilons, rhos, macheps=2^-52)
         approxError += s * thisEps
     end
 
-    return max(approxError,macheps)
+    # No absolute floor on the result. approxError is a sum of terms on the scale of the
+    # epsilons, so flooring it at a bare macheps is only right for a function whose values are of
+    # order 1: for one scaled well below that the floor exceeds the function itself, the interval
+    # arithmetic downstream inverts, and the solve throws. An error of 4e-28 on a function of size
+    # 1e-20 is a real bound, not a claim of impossible precision. The negative sums the floor used
+    # to mask are handled where they arise, at the rho clamp above.
+    return approxError
 end
 
 """Transforms points from the interval [-1, 1] to the interval [a, b].
@@ -106,7 +118,20 @@ function getFinalDegree(coeff,tol,macheps = 2^-52)
 
     # Set the final degree to the position of the last coefficient greater than convergence value
     converged_deg = Int64(div((3 * (length(coeff) - 1) / 4),1)) # Assume convergence at degree 3n/2.
-    epsval = 2*max(macheps,maximum(coeff[converged_deg+1:end])) # Set epsVal to 2x the largest coefficient past degree 3n/2
+    maxspot = argmax(coeff)
+    if length(size(coeff)) > 1
+        maxspot = maxspot[1]
+    end
+    peak = coeff[maxspot]
+    # Floor the convergence value relative to the largest coefficient rather than at an absolute
+    # macheps. Rounding puts the noise floor at macheps times the largest coefficient, so an
+    # absolute floor is only right for a function that happens to be of order 1. Scale a system
+    # down and the floor swamps the coefficients it is meant to sit under: the degree collapses,
+    # the measured decay rate falls below 1, and getApproxError sums the tail as 1/(rho-1) and
+    # returns a negative error bound. Below about 1e-16 that leaves the solver with an inverted
+    # interval and it throws. The relative floor also makes the reported error scale with the
+    # function, as an error bound should.
+    epsval = 2*max(macheps*peak,maximum(coeff[converged_deg+1:end])) # 2x the largest coefficient past degree 3n/2
     nonzero_coeffs_index = [i for i in 1:length(coeff) if coeff[i]>epsval]
     if isempty(nonzero_coeffs_index) 
         degree = 1
@@ -120,14 +145,19 @@ function getFinalDegree(coeff,tol,macheps = 2^-52)
     end
     
     # Calculate the rate of convergence
-    maxspot = argmax(coeff)
-    if length(size(coeff)) > 1
-        maxspot = maxspot[1]
+    if peak == 0
+        # Every coefficient is 0, so the approximation is exact. Report perfect convergence
+        # instead of dividing 0 by 0, which would give NaN and poison the error bound.
+        return degree, epsval, typeof(peak)(Inf)
     end
-    if epsval == 0 #Avoid divide by 0. epsVal shouldn't be able to shrink by more than 1e-24 cause floating point.
-         epsval = coeff[maxspot] * 1e-24
+    # A rho of 1 or less makes getApproxError's 1/(rho-1) negative, so hold the exponent at 1 or
+    # more, which the ratio above being greater than 1 then carries into rho itself.
+    rho = (peak/epsval)^(1/max(1, degree - maxspot + 2))
+    if !(rho > 1)
+        # The coefficients show no measurable decay, so there is no geometric tail to sum. Report
+        # the slowest rate that still gives a finite, non-negative bound rather than a negative one.
+        rho = one(rho) + macheps
     end
-    rho = (coeff[maxspot]/epsval)^(1/(degree - (maxspot) + 2))
     return degree, epsval, rho
 end
 

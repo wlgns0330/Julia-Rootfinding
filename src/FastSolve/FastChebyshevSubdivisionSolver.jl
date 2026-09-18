@@ -995,7 +995,12 @@ relApproxTol : double
 absApproxTol : double
     The absolute error increase allowed
 """
-function fast_trimMs(Ms, errors, relApproxTol=1e-3, absApproxTol=2^(-52))
+# absApproxTol is 0, not a bare macheps: the allowance below is compared against sums of
+# coefficients, so an absolute floor trims real information out of any function whose values
+# are well below 1 -- at scale 1e-8 a 2^-52 allowance is a relative tolerance of 2e-8, and the
+# roots lose accuracy in proportion. The remaining term is relative to the error already
+# carried, which is the right scale. Matches the python implementation.
+function fast_trimMs(Ms, errors, relApproxTol=1e-3, absApproxTol=0.0)
     dim = ndims(Ms[1])
     buf = Vector{Float64}()
     for polyNum in 1:dim #Loop through the polynomials
