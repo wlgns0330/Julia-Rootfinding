@@ -3,6 +3,7 @@
 [![CI](https://github.com/wlgns0330/Julia-Rootfinding/actions/workflows/CI.yml/badge.svg)](https://github.com/wlgns0330/Julia-Rootfinding/actions/workflows/CI.yml)
 [![Docs](https://github.com/wlgns0330/Julia-Rootfinding/actions/workflows/docs.yml/badge.svg)](https://github.com/wlgns0330/Julia-Rootfinding/actions/workflows/docs.yml)
 [![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://wlgns0330.github.io/Julia-Rootfinding)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/wlgns0330/Julia-Rootfinding/blob/main/CombinedNotebook.ipynb)
 
 Find all the roots of a system of smooth multivariate functions on a compact interval.
 
