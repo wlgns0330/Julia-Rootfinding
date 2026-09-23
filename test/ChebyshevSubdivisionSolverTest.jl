@@ -97,6 +97,7 @@ function test_all_ChebyshevSubdivisionSolver()
         test_zoomInOnIntervalIter()
         test_isExteriorInterval()
         test_trimMs()
+        test_trimMs_keepsATinyPolynomial()
         test_solvePolyRecursive()
         test_solveChebyshevSubdivision()
     end
@@ -9329,6 +9330,21 @@ function test_isExteriorInterval()
         @test isExteriorInterval(trackedInterval_1,trackedInterval_2) == true
         @test isExteriorInterval(trackedInterval_1,trackedInterval_3) == false
         @test isExteriorInterval(trackedInterval_2,trackedInterval_3) == true
+    end
+end
+
+function test_trimMs_keepsATinyPolynomial()
+    global type = Float64
+    global precision = 53
+    @testset "trimMs does not trim a polynomial below order 1" begin
+        # Regression test: the default absolute allowance was 2^-(precision-1), which every
+        # coefficient row of a polynomial scaled to 1e-20 fits under, so this was trimmed to the
+        # 3 coefficients kept at minimum.
+        Ms = [1e-20 .* [1.0, 0.5, 0.25, 0.125, 0.0625]]
+        errors = [0.0]
+        trimMs(Ms, errors)
+        @test length(Ms[1]) == 5
+        @test errors == [0.0]
     end
 end
 
