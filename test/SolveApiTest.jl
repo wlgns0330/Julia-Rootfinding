@@ -12,7 +12,8 @@ using Test
 # The functions are given as callables throughout, deliberately: MultiPower and MultiCheb
 # use different coefficient layouts from their Python counterparts, so a system written
 # out as raw coefficients would be asserting a layout convention rather than the solver.
-# Polynomial input is covered in PolynomialTests.jl.
+# Polynomial input is covered in PolynomialTests.jl, apart from
+# test_solve_polynomialInputAtAnyScale, which asserts on the roots rather than on a layout.
 #
 # NOT ported, because the Julia solve() has no equivalent behavior to assert:
 #   - rejects non-callable input, inverted bounds, mismatched bound lengths, and a
@@ -48,6 +49,9 @@ function test_all_SolveApi()
         test_solve_accuracy()
         test_solve_scaleInvariance()
         test_solve_doesNotModifyInputs()
+        test_solve_polynomialInputAtAnyScale()
+        test_polynomialRoundingError()
+        test_fast_trimMs_keepsATinyPolynomial()
     end
 end
 
@@ -265,5 +269,60 @@ function test_solve_doesNotModifyInputs()
         YRoots.solve(funcs, a, b)
         @test a == aCopy
         @test b == bCopy
+    end
+end
+
+# y = x^2 and y = x^3 - x/2 meet at x = 0 and at x = (1 - sqrt 3)/2 in [-1,1]^2. The rows of each
+# coefficient array are powers (or Chebyshev degrees) of x, the columns of y.
+const TWO_CURVES_X0 = (1 - sqrt(3)) / 2
+const TWO_CURVES_ROOTS = [[TWO_CURVES_X0, TWO_CURVES_X0^2], [0.0, 0.0]]
+
+function test_solve_polynomialInputAtAnyScale()
+    @testset "solve takes polynomial input at any scale" begin
+        # Regression test. A polynomial given as coefficients is exact, so its only error is
+        # rounding in those coefficients. That was a fixed 2^-52, only the right size for
+        # coefficients of order 1: from 1e-16 down it swamped every coefficient and solve
+        # overflowed the stack, and trimMs's fixed 2^-52 allowance trimmed the polynomial
+        # itself away, giving 3 roots at 1e-14 and 1 from 1e-16 down.
+        parabola = zeros(4, 2); parabola[1, 2] = 1; parabola[3, 1] = -1                   # y - x^2
+        cubic = zeros(4, 2); cubic[1, 2] = 1; cubic[4, 1] = -1; cubic[2, 1] = 0.5          # y - x^3 + x/2
+        # The same two in the Chebyshev basis: x^2 = (T0 + T2)/2 and x^3 = (3 T1 + T3)/4.
+        parabolaCheb = zeros(4, 2); parabolaCheb[1, 1] = -0.5; parabolaCheb[1, 2] = 1; parabolaCheb[3, 1] = -0.5
+        cubicCheb = zeros(4, 2); cubicCheb[1, 2] = 1; cubicCheb[2, 1] = -0.25; cubicCheb[4, 1] = -0.25
+        for scale in (1e8, 1.0, 1e-8, 1e-14, 1e-16, 1e-30)
+            for polys in ([YRoots.MultiPower(scale * parabola), YRoots.MultiPower(scale * cubic)],
+                          [YRoots.MultiCheb(scale * parabolaCheb), YRoots.MultiCheb(scale * cubicCheb)])
+                roots = sortedRoots(YRoots.solve(polys, [-1.0, -1.0], [1.0, 1.0]))
+                @test length(roots) == 2
+                @test length(roots) == 2 &&
+                      all(isapprox(r, e; atol=1e-10) for (r, e) in zip(roots, TWO_CURVES_ROOTS))
+            end
+        end
+    end
+end
+
+function test_polynomialRoundingError()
+    @testset "polynomial input error is relative to its coefficients" begin
+        coeff = [0.5 -3.0; 2.0 0.25]
+        @test YRoots.polynomialRoundingError(coeff, 2.0^-52) == 2.0^-52 * 5.75
+        for scale in (1e8, 1e-30)
+            @test YRoots.polynomialRoundingError(scale * coeff, 2.0^-52) ≈
+                  scale * YRoots.polynomialRoundingError(coeff, 2.0^-52)
+        end
+        # A relative error of exactly 0 would let solve report no roots for a polynomial that
+        # is zero everywhere, so the zero polynomial keeps the fixed macheps.
+        @test YRoots.polynomialRoundingError(zeros(3, 3), 2.0^-52) == 2.0^-52
+    end
+end
+
+function test_fast_trimMs_keepsATinyPolynomial()
+    @testset "fast_trimMs does not trim a polynomial below order 1" begin
+        # Regression test: with a fixed 2^-52 allowance every coefficient row of a polynomial
+        # scaled to 1e-20 fit under it, so this was trimmed to the 3 coefficients kept at minimum.
+        Ms = [1e-20 .* [1.0, 0.5, 0.25, 0.125, 0.0625]]
+        errors = [0.0]
+        YRoots.fast_trimMs(Ms, errors)
+        @test length(Ms[1]) == 5
+        @test errors == [0.0]
     end
 end

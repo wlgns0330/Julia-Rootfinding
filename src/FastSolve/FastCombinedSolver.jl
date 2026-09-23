@@ -90,10 +90,10 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
     for i in 1:dim
         if typeof(funcs[i]) == MultiPower
             polys[i] = multipower_to_cheb(funcs[i].coeff)
-            errs[i] = 2. ^-52
+            errs[i] = polynomialRoundingError(polys[i], 2. ^-52)
         elseif typeof(funcs[i]) == MultiCheb
             polys[i] = funcs[i].coeff
-            errs[i] = 2. ^-52
+            errs[i] = polynomialRoundingError(polys[i], 2. ^-52)
         else
             polys[i], errs[i] = fast_chebApproximate(funcs[i],a,b)
         end

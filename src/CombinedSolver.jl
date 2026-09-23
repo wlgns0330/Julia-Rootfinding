@@ -1,6 +1,22 @@
 
 
 """
+Bound the error of a polynomial given exactly as coefficients: rounding in those coefficients.
+
+Each coefficient is off by at most `macheps` times its own size, so the polynomial is off by at
+most `macheps` times the sum of their sizes anywhere on [-1,1]^n. A fixed `macheps` instead is only
+right when the coefficients are of order 1: scale them below it and the error swamps the polynomial,
+so no interval can be discarded and the solver subdivides without end.
+
+The identically zero polynomial keeps the fixed `macheps`. Its relative error is 0, which makes the
+solver report no roots for a polynomial that vanishes everywhere.
+"""
+function polynomialRoundingError(coeff, macheps)
+    absSum = sum(abs, coeff)
+    return absSum > 0 ? macheps*absSum : macheps
+end
+
+"""
     solve(funcs, a, b; verbose=false, returnBoundingBoxes=false, exact=false,
           minBoundingIntervalSize=1e-5, roundoff=53)
 
@@ -99,10 +115,10 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
     for i in 1:dim
         if typeof(funcs[i]) == MultiPower
             polys[i] = multipower_to_cheb(funcs[i].coeff)
-            errs[i] = type(2)^-(precision-1)
+            errs[i] = polynomialRoundingError(polys[i], type(2)^-(precision-1))
         elseif typeof(funcs[i]) == MultiCheb
             polys[i] = funcs[i].coeff
-            errs[i] = type(2)^-(precision-1)
+            errs[i] = polynomialRoundingError(polys[i], type(2)^-(precision-1))
         else
             polys[i], errs[i] = chebApproximate(funcs[i],a,b)
         end
