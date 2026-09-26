@@ -5,8 +5,8 @@ Bound the error of a polynomial given exactly as coefficients: rounding in those
 
 Each coefficient is off by at most `macheps` times its own size, so the polynomial is off by at
 most `macheps` times the sum of their sizes anywhere on [-1,1]^n. A fixed `macheps` instead is only
-right when the coefficients are of order 1: scale them below it and the error swamps the polynomial,
-so no interval can be discarded and the solver subdivides without end.
+right when the coefficients are of order 1: from 1e-16 down it exceeds every coefficient, and the
+solver overflowed the stack.
 
 The identically zero polynomial keeps the fixed `macheps`. Its relative error is 0, which makes the
 solver report no roots for a polynomial that vanishes everywhere.
