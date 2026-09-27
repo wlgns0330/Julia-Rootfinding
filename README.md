@@ -81,8 +81,9 @@ solve([M1, M2], [-5.0, -5.0], [5.0, 5.0])
 #  [-0.06810063797182124, 0.0342024237139548]
 ```
 
-The coefficients are used as they are only on the box `[-1, 1]^n`. On any other box, as
-here, the polynomial is evaluated and approximated there like any other function.
+The coefficients are written on the box `[-1, 1]^n`. On any other box, as here, `solve`
+first carries them onto it with the linear change of variables that maps `[-1, 1]^n` onto
+the box.
 
 Both types also evaluate directly, via `eval_MultiPower` and `eval_MultiCheb`.
 

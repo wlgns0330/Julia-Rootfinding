@@ -102,20 +102,19 @@ on the split. Computed from the width, so it stays inside the interval wherever 
 subdivisionPoint(a, b, frac) = a .+ (b .- a) .* frac
 
 """
-Whether `[a, b]` is the box [-1, 1]^n that a polynomial's coefficients are written on. Only there are
-MultiPower and MultiCheb coefficients used as they are; on any other box, including the sub-boxes a
-solve recurses on, the polynomial is approximated there like any callable.
+Whether `[a, b]` is the box [-1, 1]^n that a polynomial's coefficients are written on. On any other box,
+including the sub-boxes a solve recurses on, MultiPower and MultiCheb coefficients are first carried
+onto it by the linear change of variables x = (b - a)/2 * t + (b + a)/2, as the Python solver does.
 """
 isUnitBox(a, b) = all(a .== -1) && all(b .== 1)
 
 """
 Whether every function is a polynomial given as coefficients, a system `_refineWideBoxes` cannot improve.
 
-Evaluating a polynomial from its coefficients is off by about macheps times the sum of its terms' sizes,
-however close to a root, so its roots are only as good as that error allows (about sqrt of it, for a
-near-double root) and approximating it again on a neighborhood of a root just raises the degree until
-REFINE_MAX_DEGREE: on Chebfun2 case 1.2 given as a MultiPower or MultiCheb, every wide box does. A
-callable such as a product of factors can be accurate relative to its value, and is refined.
+A polynomial is carried onto a neighborhood by transforming its coefficients, and the error of the
+transformed coefficients stays that of the original ones however small the neighborhood, so solving
+there again finds nothing the first solve did not. A callable is approximated afresh on the
+neighborhood, with an error that shrinks with the function's size there, and is refined.
 """
 allPolynomial(funcs) = all(f isa MultiPower || f isa MultiCheb for f in funcs)
 
@@ -149,7 +148,7 @@ on are one dip below that approximation's error, so they come back as one point,
 the dip. Neither the error nor the dip is set by the roots: the dip is (d/2)^2 times the function's
 curvature, and the error shrinks with the function's size on the interval. Approximating again on a
 small neighborhood of the box therefore separates roots that are far closer together, whenever the
-function can be evaluated that accurately near them (see allPolynomial for when it cannot).
+function can be evaluated that accurately near them (see allPolynomial for polynomial input).
 
 `solver` is the solve to run on each neighborhood, `fast_solve` or the general-precision `solve`,
 called with `kwargs`. `entries` holds one `(roots, boxes, isWide)` tuple per final box, in the original
@@ -208,12 +207,12 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
 
     unitBox = isUnitBox(a, b)
     for i in 1:dim
-        if funcs[i] isa MultiPower && unitBox
-            polys[i] = multipower_to_cheb(funcs[i].coeff)
+        if funcs[i] isa MultiPower || funcs[i] isa MultiCheb
+            polys[i] = funcs[i] isa MultiPower ? multipower_to_cheb(funcs[i].coeff) : funcs[i].coeff
             errs[i] = polynomialRoundingError(polys[i], 2. ^-52)
-        elseif funcs[i] isa MultiCheb && unitBox
-            polys[i] = funcs[i].coeff
-            errs[i] = polynomialRoundingError(polys[i], 2. ^-52)
+            if !unitBox
+                polys[i], errs[i] = fast_transformCheb(polys[i], (b .- a) ./ 2, (b .+ a) ./ 2, errs[i], exact)
+            end
         else
             polys[i], errs[i] = fast_chebApproximate(funcs[i],a,b; maxDegree=_maxDegree)
         end

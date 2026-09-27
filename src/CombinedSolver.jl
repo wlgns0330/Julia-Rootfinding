@@ -162,11 +162,9 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
 
     unitBox = isUnitBox(a, b)
     for i in 1:dim
-        if funcs[i] isa MultiPower && unitBox
-            polys[i] = multipower_to_cheb(funcs[i].coeff)
-            errs[i] = polynomialRoundingError(polys[i], type(2)^-(precision-1))
-        elseif funcs[i] isa MultiCheb && unitBox
-            polys[i] = funcs[i].coeff
+        if funcs[i] isa MultiPower || funcs[i] isa MultiCheb
+            # Carried onto a box other than [-1, 1]^n below, once the coefficients are in `type`.
+            polys[i] = funcs[i] isa MultiPower ? multipower_to_cheb(funcs[i].coeff) : funcs[i].coeff
             errs[i] = polynomialRoundingError(polys[i], type(2)^-(precision-1))
         else
             # The approximation's values and coefficients are always Float64 (FFTW's DCT has no other
@@ -196,6 +194,14 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
     errs = type.(errs)
     a = type.(a)
     b = type.(b)
+    if !unitBox
+        # See isUnitBox.
+        for i in 1:dim
+            if funcs[i] isa MultiPower || funcs[i] isa MultiCheb
+                polys[i], errs[i] = transformCheb(polys[i], (b .- a) ./ 2, (b .+ a) ./ 2, errs[i], exact)
+            end
+        end
+    end
 
     minBoundingIntervalSize = type(minBoundingIntervalSize)
     
