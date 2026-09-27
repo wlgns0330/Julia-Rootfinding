@@ -52,6 +52,10 @@ function test_all_SolveApi()
         test_solve_polynomialInputAtAnyScale()
         test_polynomialRoundingError()
         test_fast_trimMs_keepsATinyPolynomial()
+        test_solve_closeRootsOffTheAxes()
+        test_solve_doubleRootReportedOnce()
+        test_solve_closeRootsOfANoisyFunctionDoNotHang()
+        test_fast_chebApproximate_stopsAtMaxDegree()
     end
 end
 
@@ -324,5 +328,54 @@ function test_fast_trimMs_keepsATinyPolynomial()
         YRoots.fast_trimMs(Ms, errors)
         @test length(Ms[1]) == 5
         @test errors == [0.0]
+    end
+end
+
+function test_solve_closeRootsOffTheAxes()
+    @testset "solve separates two roots closer than sqrt(macheps)" begin
+        # Regression test: two roots closer than about 1.5e-7 came back as one point between them.
+        # Between the roots the first function dips only to -(d/2)^2, below the error of an
+        # approximation on the whole search box once d is under about sqrt(macheps). The box such a
+        # pair ends up in stays wide, so solve approximates again on a neighborhood of it, where the
+        # error is far smaller.
+        d = 1e-9
+        roots = sortedRoots(YRoots.solve([(x, y) -> (x - y) * (x - y - d), (x, y) -> x + y - 0.5],
+                                         [-1.0, -1.0], [1.0, 1.0]))
+        expected = sortedRoots([[0.25, 0.25], [0.25 + d / 2, 0.25 - d / 2]])
+        @test length(roots) == 2
+        @test length(roots) == 2 && all(isapprox(r, e; atol=1e-3 * d) for (r, e) in zip(roots, expected))
+    end
+end
+
+function test_solve_doubleRootReportedOnce()
+    @testset "solve reports a double root once" begin
+        # y^2 = 0 has one root. On a small enough neighborhood its dip vanishes into the error and
+        # solving there finds nothing, so the root found on the whole box has to be kept.
+        roots = YRoots.solve([(x, y) -> x + 0 * y, (x, y) -> y * y], [-1.0, -1.0], [1.0, 1.0])
+        @test length(roots) == 1
+        @test all(maximum(abs.(r)) < 1e-8 for r in roots)
+    end
+end
+
+function test_solve_closeRootsOfANoisyFunctionDoNotHang()
+    @testset "solve gives up on a neighborhood it cannot approximate" begin
+        # 1 - cos(t) cancels inside the function, so it is off by about macheps near t = 0 however
+        # small the neighborhood. Approximating it there needs an ever higher degree; solve has to
+        # give up on the neighborhood and keep the point it found on the whole box.
+        for d in (1e-7, 1e-8)
+            g = (x, y) -> 1 - cos(y - d / 2) - (d / 2)^2 / 2
+            roots = YRoots.solve([(x, y) -> x + 0 * y, g], [-1.0, -1.0], [1.0, 1.0])
+            @test length(roots) >= 1
+            @test all(-d < r[2] < 2d for r in roots)
+        end
+    end
+end
+
+function test_fast_chebApproximate_stopsAtMaxDegree()
+    @testset "fast_chebApproximate stops at maxDegree" begin
+        f = (x, y) -> cos(60 * x) + y
+        @test_throws YRoots.DegreeCapExceeded YRoots.fast_chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=32)
+        approx, _ = YRoots.fast_chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=1000)
+        @test maximum(size(approx)) > 32
     end
 end

@@ -417,6 +417,11 @@ function fast_createMeshgrid(arrays...)
     return finals
 end
 
+"""Thrown when an approximation needs a higher degree than the caller allowed."""
+struct DegreeCapExceeded <: Exception
+    msg::String
+end
+
 """Compute the minimum degrees in each dimension that give a reliable Chebyshev approximation for f.
 
 For each dimension, starts with degree 8, generates an approximation, and checks to see if the
@@ -445,7 +450,7 @@ epsilons : array-like
 rhos : array-like
     The rate of convergence in each dimension.
 """
-function fast_getChebyshevDegrees(@nospecialize(f), a, b, relApproxTol, absApproxTol = 0)
+function fast_getChebyshevDegrees(@nospecialize(f), a, b, relApproxTol, absApproxTol = 0; maxDegree = nothing)
     a = reshape(a,:,1)
     b = reshape(b,:,1)
     dim = length(a)
@@ -475,6 +480,9 @@ function fast_getChebyshevDegrees(@nospecialize(f), a, b, relApproxTol, absAppro
         currGuess = 8 # Take initial guess degree 8 in the current dimension
         tupleForChunk = tuple(deleteat!([i for i in range(1,dim)],dim+1-currDim)...)
         while true # Runs until the coefficients are shown to converge to 0 in this dimension
+            if maxDegree !== nothing && currGuess > maxDegree
+                throw(DegreeCapExceeded("Approximation degree in dimension $currDim exceeded $maxDegree"))
+            end
             if currGuess > 1e5
                 #warnings.warn(f"Approximation bound exceeded!\n\nApproximation degree in dimension {currDim} "
                 #              + "has exceeded 1e5, so the process may not finish.\n\nConsider interrupting "
@@ -533,6 +541,9 @@ relApproxTol : float
     converged to zero. If all coefficients after degree n are within relApproxTol * supNorm
     (the maximum function evaluation on the interval) of zero, the coefficients will be
     considered to have converged at degree n. Defaults to 1e-10.
+maxDegree : int or nothing (keyword)
+    Defaults to nothing, for no limit. If given, DegreeCapExceeded is thrown instead of trying a
+    degree above it in any dimension.
 
 Returns
 -------
@@ -541,7 +552,7 @@ coefficient_matrix : numpy array
 error : float
     The error associated with the approximation.
 """
-function fast_chebApproximate(@nospecialize(f), a, b, relApproxTol=1e-10)
+function fast_chebApproximate(@nospecialize(f), a, b, relApproxTol=1e-10; maxDegree=nothing)
     # TODO:implement a way for the user to input Chebyshev coefficients they may already have, (MultiCheb/MultiPower stuff in python implementation)
     # Convert single values to arrays. This is in the case that a, b ∈ ℝ
 	a = (a isa Real) ? [a] : a
@@ -562,6 +573,6 @@ function fast_chebApproximate(@nospecialize(f), a, b, relApproxTol=1e-10)
         throw(ArgumentError("Invalid input: length of the upper/lower bound lists does not match the dimension (no. inputs) of the function"))
     end
     # Generate and return the approximation
-    degs, epsilons, rhos = fast_getChebyshevDegrees(f, a, b, relApproxTol)
+    degs, epsilons, rhos = fast_getChebyshevDegrees(f, a, b, relApproxTol; maxDegree=maxDegree)
     return fast_intervalApproximateND(f, degs, a, b), fast_getApproxError(degs, epsilons, rhos)
 end
