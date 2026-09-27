@@ -62,7 +62,7 @@ exact: bool
     Defaults to False. Whether transformations performed on the approximation should be performed
     with higher precision to minimize error.
 _refine : bool
-    Internal. Whether to solve again around a root whose box stayed wide (see _fast_refineWideBoxes).
+    Internal. Whether to solve again around a root whose box stayed wide (see _refineWideBoxes).
     False on the solves that refinement itself makes, so it happens once.
 _maxDegree : int or nothing
     Internal. The highest degree a callable's approximation may take (see REFINE_MAX_DEGREE).
@@ -102,6 +102,46 @@ on the split. Computed from the width, so it stays inside the interval wherever 
 subdivisionPoint(a, b, frac) = a .+ (b .- a) .* frac
 
 """
+Whether `[a, b]` is the box [-1, 1]^n that a polynomial's coefficients are written on. Only there are
+MultiPower and MultiCheb coefficients used as they are; on any other box, including the sub-boxes a
+solve recurses on, the polynomial is approximated there like any callable.
+"""
+isUnitBox(a, b) = all(a .== -1) && all(b .== 1)
+
+"""
+Whether every function is a polynomial given as coefficients, a system `_refineWideBoxes` cannot improve.
+
+Evaluating a polynomial from its coefficients is off by about macheps times the sum of its terms' sizes,
+however close to a root, so its roots are only as good as that error allows (about sqrt of it, for a
+near-double root) and approximating it again on a neighborhood of a root just raises the degree until
+REFINE_MAX_DEGREE: on Chebfun2 case 1.2 given as a MultiPower or MultiCheb, every wide box does. A
+callable such as a product of factors can be accurate relative to its value, and is refined.
+"""
+allPolynomial(funcs) = all(f isa MultiPower || f isa MultiCheb for f in funcs)
+
+"""
+The roots and boxes one final box of the subdivision solve contributes, in the original coordinates,
+as an entry `(roots, boxes, isWide)` for `_refineWideBoxes`.
+
+The box is repeated once per root, so the roots and boxes a solve returns stay paired even when the
+final step keeps several possible duplicates in one box. `isWide` marks a box wider than `wideSize`
+relative to `scale`.
+"""
+function finalBoxEntry(box, a, b, transformPoints, getFinalPoint, scale, wideSize)
+    transformedBox = transformPoints(box.finalInterval', a, b)'
+    boxRoots = Any[]
+    if length(box.possibleDuplicateRoots) > 0
+        for dup in box.possibleDuplicateRoots
+            push!(boxRoots, transformPoints(dup, a, b))
+        end
+    else
+        push!(boxRoots, transformPoints(getFinalPoint(box), a, b))
+    end
+    isWide = maximum((transformedBox[2,:] .- transformedBox[1,:]) ./ scale) > wideSize
+    return (boxRoots, Any[transformedBox for _ in boxRoots], isWide)
+end
+
+"""
 Solve again around each root whose final box is wide, and replace that box's roots with what is found.
 
 Two roots closer than about sqrt(macheps) times the width of the interval an approximation was built
@@ -109,16 +149,17 @@ on are one dip below that approximation's error, so they come back as one point,
 the dip. Neither the error nor the dip is set by the roots: the dip is (d/2)^2 times the function's
 curvature, and the error shrinks with the function's size on the interval. Approximating again on a
 small neighborhood of the box therefore separates roots that are far closer together, whenever the
-function can be evaluated that accurately near them.
+function can be evaluated that accurately near them (see allPolynomial for when it cannot).
 
-`entries` holds one `(roots, boxes, isWide)` tuple per final box, in the original coordinates, with each
-box a 2 x dim array whose first row is the lower bound. The roots and boxes of each wide entry are
-replaced. An entry keeps what it had when its neighborhood cannot be solved or turns up no root; a
-neighborhood this small is at the edge of what the solver handles: y^2 = 0 on one, for one, reports no
-root at all, and a function that cannot be evaluated accurately there needs a degree above
-REFINE_MAX_DEGREE.
+`solver` is the solve to run on each neighborhood, `fast_solve` or the general-precision `solve`,
+called with `kwargs`. `entries` holds one `(roots, boxes, isWide)` tuple per final box, in the original
+coordinates, with each box a 2 x dim array whose first row is the lower bound and one box per root.
+The roots and boxes of each wide entry are replaced. An entry keeps what it had when its neighborhood
+cannot be solved or turns up no root; a neighborhood this small is at the edge of what the solver
+handles: y^2 = 0 on one, for one, reports no root at all, and a function that cannot be evaluated
+accurately there needs a degree above REFINE_MAX_DEGREE.
 """
-function _fast_refineWideBoxes(funcs, a, b, entries; kwargs...)
+function _refineWideBoxes(solver, funcs, a, b, entries; kwargs...)
     scale = max.(abs.(a), abs.(b), 1)
     # Every box in units of scale, and the entry it came from, to decide which entry a root found on a
     # neighborhood belongs to.
@@ -138,18 +179,17 @@ function _fast_refineWideBoxes(funcs, a, b, entries; kwargs...)
         newA = max.(box[1,:] .- halfWidth, a)
         newB = min.(box[2,:] .+ halfWidth, b)
         newRoots, newBoxes = try
-            fast_solve(funcs, newA, newB; returnBoundingBoxes=true, _refine=false,
-                       _maxDegree=REFINE_MAX_DEGREE, kwargs...)
+            solver(funcs, newA, newB; returnBoundingBoxes=true, _refine=false,
+                   _maxDegree=REFINE_MAX_DEGREE, kwargs...)
         catch e
             (e isa DegreeCapExceeded || e isa StackOverflowError) || rethrow()
             continue
         end
-        isempty(newRoots) && continue
         # The neighborhood can reach into another box; a root that belongs to that box is left to it.
-        ownRoots = [r for r in newRoots if nearestEntry(r) == k]
-        isempty(ownRoots) && continue
-        ownBoxes = [bx for bx in newBoxes if nearestEntry((bx[1,:] .+ bx[2,:]) ./ 2) == k]
-        entries[k] = (ownRoots, ownBoxes, false)
+        # Roots and boxes come back paired, one box per root, so they are kept or dropped together.
+        own = [nearestEntry(r) == k for r in newRoots]
+        any(own) || continue
+        entries[k] = (newRoots[own], newBoxes[own], false)
     end
     return entries
 end
@@ -166,11 +206,12 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
         print(" ")
     end
 
+    unitBox = isUnitBox(a, b)
     for i in 1:dim
-        if typeof(funcs[i]) == MultiPower
+        if funcs[i] isa MultiPower && unitBox
             polys[i] = multipower_to_cheb(funcs[i].coeff)
             errs[i] = polynomialRoundingError(polys[i], 2. ^-52)
-        elseif typeof(funcs[i]) == MultiCheb
+        elseif funcs[i] isa MultiCheb && unitBox
             polys[i] = funcs[i].coeff
             errs[i] = polynomialRoundingError(polys[i], 2. ^-52)
         else
@@ -235,7 +276,7 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
     #Maybe return the bounding boxes in the recursive steps?
     
     #If any of the bounding boxes is too large, re-solve that box.
-    # Each entry is (roots, boxes, isWide); see _fast_refineWideBoxes.
+    # Each entry is (roots, boxes, isWide); see _refineWideBoxes.
     entries = []
     scale = max.(abs.(a), abs.(b), 1)
     for box in boundingBoxes
@@ -259,29 +300,13 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
                 push!(entries, (collect(roots), collect(boxes), false))
             end
         else
-            #Transform back
-            transformedBox = fast_transformPoints(box.finalInterval',a,b)'
-            #Get the roots from this box
-            boxRoots = []
-            if length(box.possibleDuplicateRoots) > 0
-                for dup in box.possibleDuplicateRoots
-                    push!(boxRoots,fast_transformPoints(dup,a,b))
-                end
-            else
-                push!(boxRoots,fast_transformPoints(fast_getFinalPoint(box),a,b))
-            end
-            isWide = maximum((transformedBox[2,:] .- transformedBox[1,:]) ./ scale) > REFINE_BOX_SIZE
-            push!(entries, (boxRoots, Any[transformedBox], isWide))
+            push!(entries, finalBoxEntry(box, a, b, fast_transformPoints, fast_getFinalPoint, scale, REFINE_BOX_SIZE))
         end
     end
 
-    # Only a callable is approximated again on a neighborhood. A polynomial given as coefficients is carried
-    # there by transforming its coefficients, whose error stays that of the coefficients however small the
-    # neighborhood.
-    if _refine && any(entry[3] for entry in entries) &&
-            !all(f isa MultiPower || f isa MultiCheb for f in funcs)
-        entries = _fast_refineWideBoxes(funcs, a, b, entries; verbose=verbose, exact=exact,
-                                        minBoundingIntervalSize=minBoundingIntervalSize)
+    if _refine && any(entry[3] for entry in entries) && !allPolynomial(funcs)
+        entries = _refineWideBoxes(fast_solve, funcs, a, b, entries; verbose=verbose, exact=exact,
+                                   minBoundingIntervalSize=minBoundingIntervalSize)
     end
     finalRoots = Any[r for entry in entries for r in entry[1]]
     finalBoxes = Any[bx for entry in entries for bx in entry[2]]

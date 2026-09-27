@@ -268,6 +268,16 @@ function eval_MultiCheb(multiCheb,points)
 
 end
 
+"""
+Evaluate a polynomial at a single point given as one argument per variable, as a callable passed
+to [`solve`](@ref) is.
+
+`solve` uses its coefficients directly only on the box [-1, 1]^n they are written on. On any other
+box it approximates the polynomial there as it would any callable, through this.
+"""
+(p::MultiPower)(x::Real...) = eval_MultiPower(p, collect(x))
+(p::MultiCheb)(x::Real...) = eval_MultiCheb(p, collect(x))
+
 """ Takes in a multipower coefficient matrix
     Returns the chebyshev coefficient matrix """
 function multipower_to_cheb(coeffs)

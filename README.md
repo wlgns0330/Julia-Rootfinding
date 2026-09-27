@@ -76,9 +76,13 @@ M1 = MultiPower([0 3 0 2; 1.5 0 7 0; 0 0 4 -2; 0 0 0 1])
 M2 = MultiCheb([0.02 0.31; -0.43 0.19; 0.06 0])
 
 solve([M1, M2], [-5.0, -5.0], [5.0, 5.0])
-# 1-element Vector{Any}:
-#  [-0.34050318985851813, 0.17101211857064774]
+# 2-element Vector{Any}:
+#  [-0.9895661535548544, -4.1237281738002345]
+#  [-0.06810063797182124, 0.0342024237139548]
 ```
+
+The coefficients are used as they are only on the box `[-1, 1]^n`. On any other box, as
+here, the polynomial is evaluated and approximated there like any other function.
 
 Both types also evaluate directly, via `eval_MultiPower` and `eval_MultiCheb`.
 
@@ -96,6 +100,10 @@ See the [`solve` reference](https://wlgns0330.github.io/Julia-Rootfinding/solve/
 details.
 
 ### Things to know
+
+- **Bad input fails up front.** `solve` throws an `ArgumentError` when the bounds are not
+  finite, not below one another, or not one per function (a single number is used in
+  every dimension), and when a function cannot be called with one argument per dimension.
 
 - **The input has to be well behaved.** `solve` is only guaranteed to work well when every
   function is continuous and smooth on the search interval and every root in it is simple.

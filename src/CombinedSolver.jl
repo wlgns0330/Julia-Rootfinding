@@ -17,6 +17,48 @@ function polynomialRoundingError(coeff, macheps)
 end
 
 """
+Check the arguments of [`solve`](@ref) and put the bounds in the form it works with, so bad input fails
+up front with an `ArgumentError` naming the problem instead of deep inside the solver, or not at all.
+
+Returns `(funcs, a, b)`, with `a` and `b` as new floating-point vectors of length `length(funcs)`; a
+single number for a bound is used in every dimension. The arguments themselves are left unchanged.
+"""
+function validateSolveInput(funcs, a, b)
+    (funcs isa AbstractVector || funcs isa Tuple) ||
+        throw(ArgumentError("funcs must be a vector of functions, one per dimension; got a $(typeof(funcs))"))
+    dim = length(funcs)
+    dim > 0 || throw(ArgumentError("funcs is empty; give at least one function"))
+    bound(v, name) = if v isa Real
+        fill(float(v), dim)
+    elseif v isa AbstractVector{<:Real}
+        length(v) == dim || throw(ArgumentError(
+            "$name has $(length(v)) entries but there are $dim functions; give one bound per dimension"))
+        float.(collect(v))
+    else
+        throw(ArgumentError("$name must be a number or a vector of numbers; got a $(typeof(v))"))
+    end
+    a = bound(a, "a")
+    b = bound(b, "b")
+    all(isfinite, a) && all(isfinite, b) ||
+        throw(ArgumentError("the bounds must be finite; got a = $a, b = $b"))
+    for i in 1:dim
+        a[i] < b[i] || throw(ArgumentError(
+            "the lower bound must be below the upper bound in every dimension; in dimension $i, a = $(a[i]) and b = $(b[i])"))
+    end
+    for (i, f) in enumerate(funcs)
+        if f isa MultiPower || f isa MultiCheb
+            f.dim == dim || throw(ArgumentError(
+                "function $i is a polynomial in $(f.dim) variable(s), but the system has $dim functions"))
+        elseif !applicable(f, a...)
+            throw(ArgumentError(f isa Function ?
+                "function $i cannot be called with $dim arguments, one per dimension" :
+                "function $i is a $(typeof(f)), which is not callable; give a function, MultiPower or MultiCheb"))
+        end
+    end
+    return funcs, a, b
+end
+
+"""
     solve(funcs, a, b; verbose=false, returnBoundingBoxes=false, exact=false,
           minBoundingIntervalSize=1e-5, roundoff=53)
 
@@ -33,8 +75,11 @@ search recurses until it zeros in on each root. One point -- and optionally a bo
   taking one argument per dimension, or a [`MultiCheb`](@ref) / [`MultiPower`](@ref)
   polynomial.
 - `a`: Vector holding the lower bound of the search interval in each dimension, in
-  dimension order.
-- `b`: Vector holding the upper bound, likewise.
+  dimension order, or a single number to use in every dimension.
+- `b`: The upper bound, likewise. It must be above `a` in every dimension, and both must
+  be finite; `solve` throws an `ArgumentError` otherwise, and when a function cannot be
+  called with one argument per dimension or a polynomial's dimension is not the number of
+  functions.
 
 # Keyword arguments
 - `verbose::Bool = false`: Print progress of the approximation and rootfinding to the
@@ -84,7 +129,9 @@ julia> solve([M1, M2], [-5.0, -5.0], [5.0, 5.0]);
     or an interval containing infinitely many roots, may drive the solver into deep
     subdivision; it will give up at `maxLevel` and report a wide bounding box.
 """
-function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=1e-5, roundoff=53)
+function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=1e-5, roundoff=53,
+               _refine=true, _maxDegree=nothing)
+    funcs, a, b = validateSolveInput(funcs, a, b)
     dim = length(funcs)
     # polys = Vector{Array{Float64}}()
     polys = Vector{Array{Float64,dim}}(undef, dim)
@@ -106,21 +153,32 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
         precision = 24
         type = Float32
     elseif precision <= 53
-        return fast_solve(funcs,a,b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact, minBoundingIntervalSize=minBoundingIntervalSize)
+        return fast_solve(funcs,a,b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact, minBoundingIntervalSize=minBoundingIntervalSize,
+                          _refine=_refine, _maxDegree=_maxDegree)
     else
         setprecision(precision)
         type = BigFloat
     end
 
+    unitBox = isUnitBox(a, b)
     for i in 1:dim
-        if typeof(funcs[i]) == MultiPower
+        if funcs[i] isa MultiPower && unitBox
             polys[i] = multipower_to_cheb(funcs[i].coeff)
             errs[i] = polynomialRoundingError(polys[i], type(2)^-(precision-1))
-        elseif typeof(funcs[i]) == MultiCheb
+        elseif funcs[i] isa MultiCheb && unitBox
             polys[i] = funcs[i].coeff
             errs[i] = polynomialRoundingError(polys[i], type(2)^-(precision-1))
         else
-            polys[i], errs[i] = chebApproximate(funcs[i],a,b)
+            # The approximation's values and coefficients are always Float64 (FFTW's DCT has no other
+            # type), so a callable is at best as accurate here as it is in fast_solve. Its sample grid
+            # rejects BigFloat bounds, which every sub-box of a BigFloat solve has, so those are
+            # rounded to Float64; Float16 and Float32 bounds go through as they are.
+            approxA, approxB = type == BigFloat ? (Float64.(a), Float64.(b)) : (a, b)
+            polys[i], errs[i] = chebApproximate(funcs[i],approxA,approxB; maxDegree=_maxDegree)
+            # The solver below only allows for rounding in `type`, so the approximation's own Float64
+            # rounding has to be in its error. Without it the boxes of a BigFloat solve came out narrower
+            # than that rounding, missing the root, and two roots 1e-9 apart were both lost.
+            errs[i] = max(errs[i], polynomialRoundingError(polys[i], eps(Float64)))
         end
         if verbose
             print(i)
@@ -170,7 +228,8 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
                 print(" ")
                 println(newB)
             end
-            roots, boxes = solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize, roundoff=roundoff)
+            roots, boxes = solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize, roundoff=roundoff,
+                                 _refine=_refine, _maxDegree=_maxDegree)
             if length(roots) != 0
                 append!(boundingBoxes,boxes)
                 append!(yroots,roots)
@@ -187,8 +246,12 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
     #Maybe return the bounding boxes in the recursive steps?
     
     #If any of the bounding boxes is too large, re-solve that box.
-    finalBoxes = []
-    finalRoots = []
+    # Each entry is (roots, boxes, isWide); see _refineWideBoxes.
+    entries = []
+    scale = max.(abs.(a), abs.(b), 1)
+    # A simple root's box ends up a few macheps wide, so a box is only wide once it is well past that.
+    # The approximation is built in Float64, so no box is held to more than a Float64 solve is.
+    wideSize = max(type(REFINE_BOX_SIZE), eps(type)^(5//8))
     for box in boundingBoxes
         #Get the relative max size in each dimension. If a or b > 1 in magnitude, minBoundingIntervalSize is a relative number.
         #If they are < 1 in magnitude, it is an absolute number.
@@ -204,24 +267,22 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
                 print(" ")
                 println(newB)
             end
-            roots, boxes = solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize, roundoff=roundoff)
+            roots, boxes = solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize, roundoff=roundoff,
+                                 _refine=_refine, _maxDegree=_maxDegree)
             if length(roots) > 0
-                append!(finalRoots,roots)
-                append!(finalBoxes,boxes)
+                push!(entries, (collect(roots), collect(boxes), false))
             end
         else
-            #Transform back
-            push!(finalBoxes,transformPoints(box.finalInterval',a,b)')
-            #Get the roots from this box
-            if length(box.possibleDuplicateRoots) > 0
-                for dup in box.possibleDuplicateRoots
-                    push!(finalRoots,transformPoints(dup,a,b))
-                end
-            else
-                push!(finalRoots,transformPoints(getFinalPoint(box),a,b))
-            end
+            push!(entries, finalBoxEntry(box, a, b, transformPoints, getFinalPoint, scale, wideSize))
         end
     end
+
+    if _refine && any(entry[3] for entry in entries) && !allPolynomial(funcs)
+        entries = _refineWideBoxes(solve, funcs, a, b, entries; verbose=verbose, exact=exact,
+                                   minBoundingIntervalSize=minBoundingIntervalSize, roundoff=roundoff)
+    end
+    finalRoots = Any[r for entry in entries for r in entry[1]]
+    finalBoxes = Any[bx for entry in entries for bx in entry[2]]
     # Find and return the roots (and, optionally, the bounding boxes)
     if returnBoundingBoxes
         return finalRoots, finalBoxes

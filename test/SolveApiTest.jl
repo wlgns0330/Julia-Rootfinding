@@ -15,15 +15,8 @@ using Test
 # Polynomial input is covered in PolynomialTests.jl, apart from
 # test_solve_polynomialInputAtAnyScale, which asserts on the roots rather than on a layout.
 #
-# NOT ported, because the Julia solve() has no equivalent behavior to assert:
-#   - rejects non-callable input, inverted bounds, mismatched bound lengths, and a
-#     polynomial whose dimension is not the system size. Julia performs no input
-#     validation; each of these either throws an unrelated MethodError deep in the
-#     approximator or silently returns nonsense.
-#   - a bare function outside a list, and scalar bounds broadcast to every dimension.
-#     `dim = length(funcs)` requires an indexable container, and the bounds are used as
-#     vectors, so neither form is accepted.
-# See test_solve_api.py for what those would look like if the validation is added.
+# NOT ported: a bare function outside a list. `solve` takes a vector of functions and
+# rejects anything else (see test_solve_validatesInput).
 
 const SOLVE_ATOL = 1e-8
 
@@ -57,6 +50,10 @@ function test_all_SolveApi()
         test_solve_closeRootsOfANoisyFunctionDoNotHang()
         test_fast_chebApproximate_stopsAtMaxDegree()
         test_subdivisionPoint_staysInsideTheInterval()
+        test_solve_oneBoxPerRoot()
+        test_solve_polynomialOnAnyBox()
+        test_solve_validatesInput()
+        test_solve_generalPrecisionSeparatesCloseRoots()
     end
 end
 
@@ -397,5 +394,92 @@ function test_subdivisionPoint_staysInsideTheInterval()
         p = YRoots.subdivisionPoint(BigFloat[-100, -100], BigFloat[-99, -99], BigFloat(frac))
         @test eltype(p) == BigFloat
         @test all(-100 .< p .< -99)
+    end
+end
+
+function test_solve_oneBoxPerRoot()
+    @testset "solve returns one bounding box per root" begin
+        # Regression test, Chebfun2 case 6.1. Its double root at the origin comes out of the final
+        # step as possible duplicates in one box, and that box was returned once for both, so there
+        # were 6 roots and 5 boxes and zip(roots, boxes) paired most roots with the wrong box.
+        f = (x, y) -> (y - 2x) * (y + 0.5x)
+        g = (x, y) -> x * (x^2 + y^2 - 1)
+        for roundoff in (53, 80)
+            roots, boxes = YRoots.solve([f, g], [-1.0, -1.0], [1.0, 1.0];
+                                        returnBoundingBoxes=true, roundoff=roundoff)
+            @test length(roots) >= 5
+            @test length(boxes) == length(roots)
+            @test all(all(box[1, :] .<= root .<= box[2, :]) for (root, box) in zip(roots, boxes))
+        end
+    end
+end
+
+function test_solve_polynomialOnAnyBox()
+    @testset "solve takes polynomial input on a box other than [-1, 1]^n" begin
+        # Regression test: a polynomial's coefficients were used as they are whatever the search box,
+        # which solves the polynomial composed with the map from [-1, 1]^n onto the box. x = 0.5,
+        # y = 1.5 had no root on [-2, 2]^2, and the example in solve's docstring returned a point
+        # that is not a root. The same happened on every sub-box a solve recursed on.
+        line1 = [-0.5 0.0; 1.0 0.0]     # x - 0.5
+        line2 = [-1.5 1.0; 0.0 0.0]     # y - 1.5
+        for (a, b) in (([-2.0, -2.0], [2.0, 2.0]), ([0.0, 0.0], [1.0, 2.0]), ([0.4, 1.4], [0.6, 1.6]))
+            for polys in ([YRoots.MultiPower(line1), YRoots.MultiPower(line2)],
+                          [YRoots.MultiCheb(line1), YRoots.MultiCheb(line2)])
+                roots = YRoots.solve(polys, a, b)
+                @test length(roots) == 1
+                @test length(roots) == 1 && isapprox(roots[1], [0.5, 1.5]; atol=1e-10)
+            end
+        end
+        # The docstring's example; the Python solver finds the same two roots.
+        M1 = YRoots.MultiPower([0 3 0 2; 1.5 0 7 0; 0 0 4 -2; 0 0 0 1])
+        M2 = YRoots.MultiCheb([0.02 0.31; -0.43 0.19; 0.06 0])
+        roots = sortedRoots(YRoots.solve([M1, M2], [-5.0, -5.0], [5.0, 5.0]))
+        expected = [[-0.98956615355, -4.12372817380], [-0.06810063797, 0.03420242371]]
+        @test length(roots) == 2
+        @test length(roots) == 2 && all(isapprox(r, e; atol=1e-9) for (r, e) in zip(roots, expected))
+        @test all(abs(YRoots.eval_MultiPower(M1, r)) < 1e-10 && abs(YRoots.eval_MultiCheb(M2, r)) < 1e-10
+                  for r in roots)
+    end
+end
+
+function test_solve_validatesInput()
+    @testset "solve rejects bad input up front" begin
+        f = (x, y) -> x - 0.5
+        g = (x, y) -> y + 0.25
+        good = ([f, g], [-1.0, -1.0], [1.0, 1.0])
+        @test length(YRoots.solve(good...)) == 1
+        # Each of these used to throw an unrelated error deep in the approximator, or return nonsense.
+        @test_throws ArgumentError YRoots.solve(f, [-1.0], [1.0])                           # not a vector
+        @test_throws ArgumentError YRoots.solve([], Float64[], Float64[])                   # no functions
+        @test_throws ArgumentError YRoots.solve([f, g], [-1.0], [1.0, 1.0])                 # too few bounds
+        @test_throws ArgumentError YRoots.solve([f, g], [-1.0, -1.0, -1.0], [1.0, 1.0])     # too many
+        @test_throws ArgumentError YRoots.solve([f, g], [1.0, -1.0], [-1.0, 1.0])           # inverted
+        @test_throws ArgumentError YRoots.solve([f, g], [-1.0, 0.5], [1.0, 0.5])            # empty
+        @test_throws ArgumentError YRoots.solve([f, g], [-Inf, -1.0], [1.0, 1.0])           # infinite
+        @test_throws ArgumentError YRoots.solve([f, g], [NaN, -1.0], [1.0, 1.0])            # NaN
+        @test_throws ArgumentError YRoots.solve([f, g], "a", [1.0, 1.0])                    # not numbers
+        @test_throws ArgumentError YRoots.solve([f, (x, y, z) -> z], [-1.0, -1.0], [1.0, 1.0])  # wrong arity
+        @test_throws ArgumentError YRoots.solve([f, 3.0], [-1.0, -1.0], [1.0, 1.0])         # not callable
+        @test_throws ArgumentError YRoots.solve([f, YRoots.MultiPower(zeros(2, 2, 2) .+ 1)],
+                                                [-1.0, -1.0], [1.0, 1.0])                   # 3-D polynomial
+        # The bounds that are accepted: a number for every dimension, integers, and a tuple of functions.
+        for (funcs, a, b) in (([f, g], -1, 1), ([f, g], [-1, -1], [1, 1]), ((f, g), -1.0, 1.0))
+            roots = YRoots.solve(funcs, a, b)
+            @test length(roots) == 1 && isapprox(roots[1], [0.5, -0.25]; atol=SOLVE_ATOL)
+        end
+    end
+end
+
+function test_solve_generalPrecisionSeparatesCloseRoots()
+    @testset "solve at other precisions separates close roots" begin
+        # Regression test: above 53 bits of roundoff, solve lost both roots of this pair. The
+        # approximation is built in Float64, but only rounding at the solve's own precision was
+        # allowed for. It also did not approximate again around a wide box, as the Float64 path does.
+        d = 1e-9
+        roots = sortedRoots(YRoots.solve([(x, y) -> (x - y) * (x - y - d), (x, y) -> x + y - 0.5],
+                                         [-1.0, -1.0], [1.0, 1.0]; roundoff=80))
+        expected = sortedRoots([[0.25, 0.25], [0.25 + d / 2, 0.25 - d / 2]])
+        @test length(roots) == 2
+        @test length(roots) == 2 && all(isapprox(r, e; atol=1e-3 * d) for (r, e) in zip(roots, expected))
     end
 end
