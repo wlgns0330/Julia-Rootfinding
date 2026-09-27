@@ -160,7 +160,7 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
             #TODO: Do we need to combine bounding boxes in this step of the recursion as well?
             #      For now it seems safe enough to assume we won't have any roots on the midpoints.
             val = reverse(val)
-            midPoint = (a + b) .* type(0.51234912839471234)
+            midPoint = subdivisionPoint(a, b, type(0.51234912839471234))
             newA = ifelse.(val,midPoint,a)
             newB = ifelse.(val,b,midPoint)
             #Solve recursively

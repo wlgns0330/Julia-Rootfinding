@@ -56,6 +56,7 @@ function test_all_SolveApi()
         test_solve_doubleRootReportedOnce()
         test_solve_closeRootsOfANoisyFunctionDoNotHang()
         test_fast_chebApproximate_stopsAtMaxDegree()
+        test_subdivisionPoint_staysInsideTheInterval()
     end
 end
 
@@ -377,5 +378,24 @@ function test_fast_chebApproximate_stopsAtMaxDegree()
         @test_throws YRoots.DegreeCapExceeded YRoots.fast_chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=32)
         approx, _ = YRoots.fast_chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=1000)
         @test maximum(size(approx)) > 32
+    end
+end
+
+function test_subdivisionPoint_staysInsideTheInterval()
+    @testset "an interval that cannot be shrunk is split inside itself" begin
+        # Regression test: the split point was (a + b) * frac, which is only inside [a, b] when the
+        # interval straddles the origin. On [-100, -99] it was -101.96, so both halves reached outside
+        # the search interval.
+        frac = 0.51234912839471234
+        for (a, b) in (([-1.0, -1.0], [1.0, 1.0]), ([-100.0, -100.0], [-99.0, -99.0]),
+                       ([10.0, -3.0], [11.0, 5.0]), ([0.0, 0.0], [1e-8, 1e-8]))
+            p = YRoots.subdivisionPoint(a, b, frac)
+            @test all(a .< p .< b)
+            @test p ≈ a .+ frac .* (b .- a)
+        end
+        # The general-precision solver passes its own float type through unchanged.
+        p = YRoots.subdivisionPoint(BigFloat[-100, -100], BigFloat[-99, -99], BigFloat(frac))
+        @test eltype(p) == BigFloat
+        @test all(-100 .< p .< -99)
     end
 end

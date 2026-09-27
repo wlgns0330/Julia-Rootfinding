@@ -94,6 +94,14 @@ const REFINE_PADDING = 2
 const REFINE_MAX_DEGREE = 100
 
 """
+The point where a search interval `[a, b]` that could not be shrunk is split, `frac` of the way from
+`a` to `b` in each dimension; `frac` is just off one half, so a root on the exact midpoint does not land
+on the split. Computed from the width, so it stays inside the interval wherever the interval is: scaling
+`a + b` instead gave a point outside it for an interval away from the origin: -101.96 for `[-100, -99]`.
+"""
+subdivisionPoint(a, b, frac) = a .+ (b .- a) .* frac
+
+"""
 Solve again around each root whose final box is wide, and replace that box's roots with what is found.
 
 Two roots closer than about sqrt(macheps) times the width of the interval an approximation was built
@@ -199,7 +207,7 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
             #TODO: Do we need to combine bounding boxes in this step of the recursion as well?
             #      For now it seems safe enough to assume we won't have any roots on the midpoints.
             val = reverse(val)
-            midPoint = (a + b) .* 0.51234912839471234
+            midPoint = subdivisionPoint(a, b, 0.51234912839471234)
             newA = ifelse.(val,midPoint,a)
             newB = ifelse.(val,b,midPoint)
             #Solve recursively
