@@ -15,6 +15,7 @@ include(joinpath(@__DIR__, "..", "src", "StructsWithTheirFunctions", "TrackedInt
 include(joinpath(@__DIR__, "..", "src", "StructsWithTheirFunctions", "SolverOptions.jl"))
 include("PolynomialTests.jl")
 include("SolveApiTest.jl")
+include("ChebfunSuiteTest.jl")
 
 # Each suite runs inside one outer testset so that a failure in one does not abort the
 # rest -- an inner testset that fails records the failure and the run continues, where
@@ -27,6 +28,7 @@ function test_all()
         test_all_TrackedInterval()
         test_all_QuadraticCheck()
         test_all_Polynomial()
+        test_all_ChebfunSuite()
     end
 end
 
