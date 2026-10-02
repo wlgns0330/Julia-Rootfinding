@@ -462,6 +462,10 @@ function test_solve_validatesInput()
         @test_throws ArgumentError YRoots.solve([f, 3.0], [-1.0, -1.0], [1.0, 1.0])         # not callable
         @test_throws ArgumentError YRoots.solve([f, YRoots.MultiPower(zeros(2, 2, 2) .+ 1)],
                                                 [-1.0, -1.0], [1.0, 1.0])                   # 3-D polynomial
+        # Regression test: only the caller's bounds are checked. The solver's own solves on sub-boxes skip
+        # the check (`_validate=false`), because in Float16 a sub-box's two bounds can round to the same
+        # value, 0.4766 and 0.4766 on Chebfun2 case 9.2, and the check stopped the solve with this error.
+        @test (YRoots.solve([f, g], Float16[-1.0, 0.4766], Float16[1.0, 0.4766]; roundoff=11, _validate=false); true)
         # The bounds that are accepted: a number for every dimension, integers, and a tuple of functions.
         for (funcs, a, b) in (([f, g], -1, 1), ([f, g], [-1, -1], [1, 1]), ((f, g), -1.0, 1.0))
             roots = YRoots.solve(funcs, a, b)

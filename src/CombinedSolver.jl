@@ -130,8 +130,12 @@ julia> solve([M1, M2], [-5.0, -5.0], [5.0, 5.0]);
     subdivision; it will give up at `maxLevel` and report a wide bounding box.
 """
 function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=1e-5, roundoff=53,
-               _refine=true, _maxDegree=nothing)
-    funcs, a, b = validateSolveInput(funcs, a, b)
+               _refine=true, _maxDegree=nothing, _validate=true)
+    # Only the caller's input is checked. The solves below on sub-boxes pass `_validate=false`: in Float16
+    # the two bounds of a sub-box can round to the same value (0.4766 and 0.4766), which the check rejects.
+    if _validate
+        funcs, a, b = validateSolveInput(funcs, a, b)
+    end
     dim = length(funcs)
     # polys = Vector{Array{Float64}}()
     polys = Vector{Array{Float64,dim}}(undef, dim)
@@ -235,7 +239,7 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
                 println(newB)
             end
             roots, boxes = solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize, roundoff=roundoff,
-                                 _refine=_refine, _maxDegree=_maxDegree)
+                                 _refine=_refine, _maxDegree=_maxDegree, _validate=false)
             if length(roots) != 0
                 append!(boundingBoxes,boxes)
                 append!(yroots,roots)
@@ -274,7 +278,7 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
                 println(newB)
             end
             roots, boxes = solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize, roundoff=roundoff,
-                                 _refine=_refine, _maxDegree=_maxDegree)
+                                 _refine=_refine, _maxDegree=_maxDegree, _validate=false)
             if length(roots) > 0
                 push!(entries, (collect(roots), collect(boxes), false))
             end
@@ -285,7 +289,8 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
 
     if _refine && any(entry[3] for entry in entries) && !allPolynomial(funcs)
         entries = _refineWideBoxes(solve, funcs, a, b, entries; verbose=verbose, exact=exact,
-                                   minBoundingIntervalSize=minBoundingIntervalSize, roundoff=roundoff)
+                                   minBoundingIntervalSize=minBoundingIntervalSize, roundoff=roundoff,
+                                   _validate=false)
     end
     finalRoots = Any[r for entry in entries for r in entry[1]]
     finalBoxes = Any[bx for entry in entries for bx in entry[2]]
