@@ -982,7 +982,7 @@ function fast_getSubdivisionIntervals(Ms,errors,trackedInterval,exact,level;oneD
         newMidpoint = trackedInterval.nextTransformPoints[thisDim]
         newSubinterval = ones(ET, size(trackedInterval.interval)) #TODO: Make this outside for loop
         newSubinterval[1,:] .= -1
-        newIntervals = []
+        newIntervals = typeof(trackedInterval)[]
         for oldInterval in allIntervals
             newInterval1 = fast_copyInterval(oldInterval)
             newInterval2 = fast_copyInterval(oldInterval)
@@ -1119,11 +1119,15 @@ boundingBoxesExterior : list of arrays (optional)
     interval
 """
 function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
+    # Every list of intervals below holds this one concrete type. Untyped `[]` lists made the result of
+    # each recursive call unknown to the compiler, so every append! and loop over them was dispatched at
+    # run time.
+    IT = typeof(trackedInterval)
 
     #TODO: Check if trackedInterval.interval has width 0 in some dimension, in which case we should get rid of that dimension.
     #If the interval is a point, return it
     if fast_isPoint(trackedInterval)
-        return [], [trackedInterval]
+        return IT[], IT[trackedInterval]
     end
 
     #If we ever change the options in this function, we will need to do a copy here.
@@ -1144,7 +1148,7 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
             end
         end
         if tooBig
-            return [], []
+            return IT[], IT[]
         end
     end
 
@@ -1153,7 +1157,7 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     if (solverOptions.low_dim_quadratic_check && ndims(Ms[1]) <= 3) || solverOptions.all_dim_quadratic_check
         for i in eachindex(Ms)
             if quadraticCheck(Ms[i], errors[i])
-                return [], []
+                return IT[], IT[]
             end
         end
     end
@@ -1172,14 +1176,15 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     originalInterval = fast_copyInterval(trackedInterval)
     originalIntervalSize = fast_sizeOfInterval(trackedInterval)
     #Zoom in while we can
-    global should_stop = false
+    # A local: as a global, every read of it was a lookup of a value of unknown type.
+    should_stop = false
     lastSizes = fast_dimSize(trackedInterval)
     while changed && zoomCount <= solverOptions.maxZoomCount
         #Zoom in until we stop changing or we hit machine epsilon
         Ms, errors, trackedInterval, changed, should_stop = fast_zoomInOnIntervalIter(Ms, errors, trackedInterval, solverOptions.exact)
 
         if trackedInterval.empty #Throw out the interval
-            return [], []
+            return IT[], IT[]
         end
         #Only count in towards the max is we don't cut the interval in half
         newSizes = fast_dimSize(trackedInterval)
@@ -1197,10 +1202,10 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
             end
             if fast_isExteriorInterval(originalInterval, trackedInterval)
                 #input("val:")
-                return [], [trackedInterval]
+                return IT[], IT[trackedInterval]
             else
                 #input("val:")
-                return [trackedInterval], []
+                return IT[trackedInterval], IT[]
             end
         else
             fast_startFinalStep(trackedInterval)
@@ -1210,7 +1215,7 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     elseif trackedInterval.finalStep
         trackedInterval.canThrowOutFinalStep = true
         allMs, allErrors, allIntervals = fast_getSubdivisionIntervals(Ms, errors, trackedInterval, solverOptions.exact, solverOptions.level;oneDimension=false)
-        resultsAll = []
+        resultsAll = IT[]
         for (newMs, newErrs, newInt) in zip(allMs, allErrors, allIntervals)
             newInterior, newExterior = fast_solvePolyRecursive(newMs, newInt, newErrs, solverOptions)
             append!(resultsAll, newInterior)
@@ -1220,16 +1225,16 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
             #Can't throw out final step! This might not actually be a root though!
             trackedInterval.possibleExtraRoot = true
             if fast_isExteriorInterval(originalInterval, trackedInterval)
-                return [], [trackedInterval]
+                return IT[], IT[trackedInterval]
             else
-                return [trackedInterval], []
+                return IT[trackedInterval], IT[]
             end
         else
             #Combine all roots that converged to the same point.
-            allFoundRoots = Set([])
-            tempResults = []
+            allFoundRoots = Set{Vector{eltype(trackedInterval.interval)}}()
+            tempResults = IT[]
             for result in resultsAll
-                point = Tuple(result.interval[1,:])
+                point = result.interval[1,:]
                 if point in allFoundRoots
                     continue
                 end
@@ -1244,9 +1249,9 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                 end
             end
             if fast_isExteriorInterval(originalInterval, trackedInterval)
-                return [], [trackedInterval]
+                return IT[], IT[trackedInterval]
             else
-                return [trackedInterval], []
+                return IT[trackedInterval], IT[]
             end
             #TODO: Don't subdivide in the final step in dimensions that are already points!
         end
@@ -1269,9 +1274,9 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                         " are continuous, smooth, and have only finitely many simple roots on the" *
                         " search interval, or raise maxLevel in SolverOptions." maxlog=1
             if fast_isExteriorInterval(originalInterval, trackedInterval)
-                return [], [trackedInterval]
+                return IT[], IT[trackedInterval]
             else
-                return [trackedInterval], []
+                return IT[trackedInterval], IT[]
             end
         end
         if solverOptions.level == 15
@@ -1282,7 +1287,7 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                         "Ensure the input functions meet the requirements of being continuous, smooth," *
                         "and having only finitely many simple roots on the search interval."
         end
-        resultInterior, resultExterior = [], []
+        resultInterior, resultExterior = IT[], IT[]
         #Get the new intervals and polynomials
         allMs, allErrors, allIntervals = fast_getSubdivisionIntervals(Ms, errors, trackedInterval, solverOptions.exact, solverOptions.level;oneDimension=false)
         #Run each interval
@@ -1345,7 +1350,7 @@ function fast_solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
             idx2 = idx1 + 1
         end
         #Rerun, check if still on exterior
-        newResultExterior = []
+        newResultExterior = IT[]
         for tempInterval in resultExterior
             if tempInterval.reRun
                 if isapprox(tempInterval.interval,originalInterval.interval)
@@ -1430,7 +1435,7 @@ function fast_solveChebyshevSubdivision(Ms, errors; verbose = false, returnBound
     b1, b2 = fast_solvePolyRecursive(Ms, originalInterval, errors, solverOptions)
 
     boundingIntervals = append!(b1, b2)
-    roots = []
+    roots = Vector{T}[]
     hasDupRoots = false
     hasExtraRoots = false
 
