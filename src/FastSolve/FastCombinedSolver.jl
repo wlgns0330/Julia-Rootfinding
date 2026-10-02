@@ -193,12 +193,38 @@ function _refineWideBoxes(solver, funcs, a, b, entries; kwargs...)
     return entries
 end
 
+"""
+The width above which a root's final box counts as wide (see `_refineWideBoxes`), relative to the bounds.
+
+A simple root's box ends up a few rounding steps wide, so in Float64 that is REFINE_BOX_SIZE. A lower
+precision's boxes are proportionally wider, so its threshold scales up with it (eps^(5/8): 4.7e-5 for
+Float32, 1.3e-2 for Float16); without that every root of a Float32 solve would count as wide and be
+solved again. Callables are approximated in Float64, so BigFloat keeps the Float64 threshold.
+"""
+wideBoxSize(::Type{T}) where {T} = eps(T) > eps(Float64) ? Float64(eps(T))^(5/8) : REFINE_BOX_SIZE
+
+"""
+The error bound for a Float64 approximation `coeffs` (whose own error is `approxError`) once it is
+converted to the solve's type T.
+
+The solver allows only for rounding in T. In Float64 that already covers the approximation, so the bound
+is unchanged. Below Float64 the conversion to T rounds each coefficient again; above it the Float64
+rounding of the approximation is larger than anything the solver allows for. Either way the coarser of
+the two is added to the bound, rounded up so converting the bound to T cannot shrink it. Without it,
+Float32 returned no roots for a pair 1e-6 apart and an 80-bit BigFloat solve for one 1e-9 apart.
+"""
+function convertedApproxError(::Type{T}, coeffs, approxError) where {T}
+    T === Float64 && return approxError
+    bound = approxError + polynomialRoundingError(coeffs, max(eps(Float64), Float64(eps(T))))
+    return nextfloat(T(bound))
+end
+
 function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingIntervalSize,
-                    _refine=true, _maxDegree=nothing)
+                    _refine=true, _maxDegree=nothing, numtype::Type{<:AbstractFloat}=Float64)
+    T = numtype
     dim = length(funcs)
-    # polys = Vector{Array{Float64}}()
-    polys = Vector{Array{Float64,dim}}(undef, dim)
-    errs = fill(0.0,dim)
+    polys = Vector{Array{T,dim}}(undef, dim)
+    errs = zeros(T, dim)
     # Get an approximation for each function.
     if verbose
         print("Approximation shapes:")
@@ -208,13 +234,19 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
     unitBox = isUnitBox(a, b)
     for i in 1:dim
         if funcs[i] isa MultiPower || funcs[i] isa MultiCheb
-            polys[i] = funcs[i] isa MultiPower ? multipower_to_cheb(funcs[i].coeff) : funcs[i].coeff
-            errs[i] = polynomialRoundingError(polys[i], 2. ^-52)
+            # The coefficients are converted to T first, so the basis conversion and the change of
+            # variables onto the box are both done in the solve's precision.
+            coeff = T.(funcs[i].coeff)
+            polys[i] = funcs[i] isa MultiPower ? multipower_to_cheb(coeff) : coeff
+            errs[i] = polynomialRoundingError(polys[i], eps(T))
             if !unitBox
-                polys[i], errs[i] = fast_transformCheb(polys[i], (b .- a) ./ 2, (b .+ a) ./ 2, errs[i], exact)
+                polys[i], errs[i] = fast_transformCheb(polys[i], T.((b .- a) ./ 2), T.((b .+ a) ./ 2), errs[i], exact)
             end
         else
-            polys[i], errs[i] = fast_chebApproximate(funcs[i],a,b; maxDegree=_maxDegree)
+            # Always approximated in Float64 (FFTW's DCT has no other type), then converted.
+            approx, approxError = fast_chebApproximate(funcs[i], Float64.(a), Float64.(b); maxDegree=_maxDegree)
+            polys[i] = T.(approx)
+            errs[i] = convertedApproxError(T, approx, approxError)
         end
         if verbose
             print(i)
@@ -258,7 +290,7 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
                 println(newB)
             end
             roots, boxes = fast_solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize,
-                                      _refine=_refine, _maxDegree=_maxDegree)
+                                      _refine=_refine, _maxDegree=_maxDegree, numtype=T)
             if length(roots) != 0
                 append!(boundingBoxes,boxes)
                 append!(yroots,roots)
@@ -284,7 +316,10 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
         newBox = fast_transformPoints(box.finalInterval',a,b)
         newA, newB = newBox[:,1],newBox[:,2]
 
-        relMaxSize = minBoundingIntervalSize .* maximum(hcat(abs.(a),abs.(b),fill(1,length(a))),dims=2)
+        # A box only a few rounding steps of T wide cannot be shrunk by solving it again, and in Float16 the
+        # default 1e-5 is below one step (2.4e-4 near 0.3): solving such a box again found nothing and its
+        # root was dropped. The floor of 8 steps is below 1e-5 for Float32 and above, so it changes nothing there.
+        relMaxSize = max(minBoundingIntervalSize, 8*eps(T)) .* maximum(hcat(abs.(a),abs.(b),fill(1,length(a))),dims=2)
         if all(newB - newA .> relMaxSize)
             #Re-solve this box
             if verbose
@@ -294,18 +329,18 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
                 println(newB)
             end
             roots, boxes = fast_solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize,
-                                      _refine=_refine, _maxDegree=_maxDegree)
+                                      _refine=_refine, _maxDegree=_maxDegree, numtype=T)
             if length(roots) > 0
                 push!(entries, (collect(roots), collect(boxes), false))
             end
         else
-            push!(entries, finalBoxEntry(box, a, b, fast_transformPoints, fast_getFinalPoint, scale, REFINE_BOX_SIZE))
+            push!(entries, finalBoxEntry(box, a, b, fast_transformPoints, fast_getFinalPoint, scale, wideBoxSize(T)))
         end
     end
 
     if _refine && any(entry[3] for entry in entries) && !allPolynomial(funcs)
         entries = _refineWideBoxes(fast_solve, funcs, a, b, entries; verbose=verbose, exact=exact,
-                                   minBoundingIntervalSize=minBoundingIntervalSize)
+                                   minBoundingIntervalSize=minBoundingIntervalSize, numtype=T)
     end
     finalRoots = Any[r for entry in entries for r in entry[1]]
     finalBoxes = Any[bx for entry in entries for bx in entry[2]]

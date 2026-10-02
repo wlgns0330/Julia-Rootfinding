@@ -59,6 +59,12 @@ function validateSolveInput(funcs, a, b)
 end
 
 """
+The number type `solve` runs in for `roundoff` bits of precision: Float16 for 11 or fewer, Float32 for 24
+or fewer, Float64 for 53 or fewer, and BigFloat (at `roundoff` bits) above that.
+"""
+solveType(roundoff) = roundoff <= 11 ? Float16 : roundoff <= 24 ? Float32 : roundoff <= 53 ? Float64 : BigFloat
+
+"""
     solve(funcs, a, b; verbose=false, returnBoundingBoxes=false, exact=false,
           minBoundingIntervalSize=1e-5, roundoff=53)
 
@@ -94,9 +100,11 @@ search recurses until it zeros in on each root. One point -- and optionally a bo
   absolute while the interval in question lies within `[-1, 1]`, and relative otherwise:
   for an interval with an endpoint of magnitude greater than 1, it is multiplied by that
   magnitude in that dimension.
-- `roundoff::Int = 53`: Bits of precision to solve at. `53` selects `Float64` and the fast
-  solver; `<= 24` selects `Float32`, `<= 11` selects `Float16`, and anything above 53
-  switches to `BigFloat` at that precision.
+- `roundoff::Int = 53`: Bits of precision to solve at. `53` (the default, and anything from 25
+  to 53) solves in `Float64`, `<= 24` in `Float32`, `<= 11` in `Float16`, and anything above 53 in
+  `BigFloat` at that precision. Every precision runs the same solver. A callable is always
+  approximated in `Float64`, so a higher precision can only improve the accuracy of polynomial
+  input ([`MultiPower`](@ref) / [`MultiCheb`](@ref)).
 
 # Returns
 A vector of roots, each a point in the search interval. With `returnBoundingBoxes = true`,
@@ -129,175 +137,16 @@ julia> solve([M1, M2], [-5.0, -5.0], [5.0, 5.0]);
     or an interval containing infinitely many roots, may drive the solver into deep
     subdivision; it will give up at `maxLevel` and report a wide bounding box.
 """
+
 function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=1e-5, roundoff=53,
-               _refine=true, _maxDegree=nothing, _validate=true)
-    # Only the caller's input is checked. The solves below on sub-boxes pass `_validate=false`: in Float16
-    # the two bounds of a sub-box can round to the same value (0.4766 and 0.4766), which the check rejects.
-    if _validate
-        funcs, a, b = validateSolveInput(funcs, a, b)
-    end
-    dim = length(funcs)
-    # polys = Vector{Array{Float64}}()
-    polys = Vector{Array{Float64,dim}}(undef, dim)
-    errs = fill(0.0,dim)
-    # Get an approximation for each function.
-    if verbose
-        print("Approximation shapes:")
-        print(" ")
-    end
-
-    # Set precision for Solver
-    global type = Float64
-    global precision = roundoff
-
-    if precision <= 11
-        precision = 11
-        type = Float16
-    elseif precision <= 24
-        precision = 24
-        type = Float32
-    elseif precision <= 53
-        return fast_solve(funcs,a,b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact, minBoundingIntervalSize=minBoundingIntervalSize,
-                          _refine=_refine, _maxDegree=_maxDegree)
-    else
-        setprecision(precision)
-        type = BigFloat
-    end
-
-    unitBox = isUnitBox(a, b)
-    for i in 1:dim
-        if funcs[i] isa MultiPower || funcs[i] isa MultiCheb
-            # Carried onto a box other than [-1, 1]^n below, once the coefficients are in `type`.
-            polys[i] = funcs[i] isa MultiPower ? multipower_to_cheb(funcs[i].coeff) : funcs[i].coeff
-            errs[i] = polynomialRoundingError(polys[i], type(2)^-(precision-1))
-        else
-            # The approximation's values and coefficients are always Float64 (FFTW's DCT has no other
-            # type), so a callable is at best as accurate here as it is in fast_solve. Its sample grid
-            # rejects BigFloat bounds, which every sub-box of a BigFloat solve has, so those are
-            # rounded to Float64; Float16 and Float32 bounds go through as they are.
-            approxA, approxB = type == BigFloat ? (Float64.(a), Float64.(b)) : (a, b)
-            polys[i], errs[i] = chebApproximate(funcs[i],approxA,approxB; maxDegree=_maxDegree)
-            # The solver below only allows for rounding in `type`, so the approximation's own Float64
-            # rounding has to be in its error. Without it the boxes of a BigFloat solve came out narrower
-            # than that rounding, missing the root, and two roots 1e-9 apart were both lost.
-            errs[i] = max(errs[i], polynomialRoundingError(polys[i], eps(Float64)))
-        end
-        if verbose
-            print(i)
-            print(": ")
-            print(reverse(size(polys[i])))
-            if i != dim
-                print(" ")
-            else
-                print("\n")
-            end
-        end
-    end
-
-    polys = [type.(arr) for arr in polys]
-    errs = type.(errs)
-    a = type.(a)
-    b = type.(b)
-    if !unitBox
-        # See isUnitBox.
-        for i in 1:dim
-            if funcs[i] isa MultiPower || funcs[i] isa MultiCheb
-                polys[i], errs[i] = transformCheb(polys[i], (b .- a) ./ 2, (b .+ a) ./ 2, errs[i], exact)
-            end
-        end
-    end
-
-    minBoundingIntervalSize = type(minBoundingIntervalSize)
-    
-    if verbose
-        print("Searching on interval ")
-        println([[a[i],b[i]] for i in 1:dim])
-    end
-
-    #Solve the Chebyshev polynomial system
-    yroots, boundingBoxes = solveChebyshevSubdivision(polys,errs;verbose=verbose,returnBoundingBoxes=true,exact=exact,
-                constant_check=true, low_dim_quadratic_check=true, all_dim_quadratic_check=false)
-
-    #If the bounding box is the entire interval, subdivide it!
-    usingSubdivision = all(b-a .> minBoundingIntervalSize)
-    if length(boundingBoxes) == 1 && all(finalDimSize(boundingBoxes[1]) .== 2) && usingSubdivision
-        #Subdivide the interval and resolve to get better resolution across different parts of the interval
-        yroots, boundingBoxes = [], []
-        for val in Iterators.product(Iterators.repeated(([false,true]), length(a))...)
-            #Split almost in half
-            #TODO: Do we need to combine bounding boxes in this step of the recursion as well?
-            #      For now it seems safe enough to assume we won't have any roots on the midpoints.
-            val = reverse(val)
-            midPoint = subdivisionPoint(a, b, type(0.51234912839471234))
-            newA = ifelse.(val,midPoint,a)
-            newB = ifelse.(val,b,midPoint)
-            #Solve recursively
-            if verbose
-                print("Re-solving on: ")
-                print(newA)
-                print(" ")
-                println(newB)
-            end
-            roots, boxes = solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize, roundoff=roundoff,
-                                 _refine=_refine, _maxDegree=_maxDegree, _validate=false)
-            if length(roots) != 0
-                append!(boundingBoxes,boxes)
-                append!(yroots,roots)
-            end
-        end
-        if returnBoundingBoxes
-            return yroots, boundingBoxes
-        else
-            return yroots
-        end
-    end
-
-    #TODO: Handle if we have duplicate roots or extra roots at the top level. Easiest if we actually return the bounding boxes!
-    #Maybe return the bounding boxes in the recursive steps?
-    
-    #If any of the bounding boxes is too large, re-solve that box.
-    # Each entry is (roots, boxes, isWide); see _refineWideBoxes.
-    entries = []
-    scale = max.(abs.(a), abs.(b), 1)
-    # A simple root's box ends up a few macheps wide, so a box is only wide once it is well past that.
-    # The approximation is built in Float64, so no box is held to more than a Float64 solve is.
-    wideSize = max(type(REFINE_BOX_SIZE), eps(type)^(5//8))
-    for box in boundingBoxes
-        #Get the relative max size in each dimension. If a or b > 1 in magnitude, minBoundingIntervalSize is a relative number.
-        #If they are < 1 in magnitude, it is an absolute number.
-        newBox = transformPoints(box.finalInterval',a,b)
-        newA, newB = newBox[:,1],newBox[:,2]
-
-        relMaxSize = minBoundingIntervalSize .* maximum(hcat(abs.(a),abs.(b),fill(type(1),length(a))),dims=2)
-        if all(newB - newA .> relMaxSize)
-            #Re-solve this box
-            if verbose
-                print("Re-solving on: ")
-                print(newA)
-                print(" ")
-                println(newB)
-            end
-            roots, boxes = solve(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize, roundoff=roundoff,
-                                 _refine=_refine, _maxDegree=_maxDegree, _validate=false)
-            if length(roots) > 0
-                push!(entries, (collect(roots), collect(boxes), false))
-            end
-        else
-            push!(entries, finalBoxEntry(box, a, b, transformPoints, getFinalPoint, scale, wideSize))
-        end
-    end
-
-    if _refine && any(entry[3] for entry in entries) && !allPolynomial(funcs)
-        entries = _refineWideBoxes(solve, funcs, a, b, entries; verbose=verbose, exact=exact,
-                                   minBoundingIntervalSize=minBoundingIntervalSize, roundoff=roundoff,
-                                   _validate=false)
-    end
-    finalRoots = Any[r for entry in entries for r in entry[1]]
-    finalBoxes = Any[bx for entry in entries for bx in entry[2]]
-    # Find and return the roots (and, optionally, the bounding boxes)
-    if returnBoundingBoxes
-        return finalRoots, finalBoxes
-    else
-        return finalRoots
-    end
+               _refine=true, _maxDegree=nothing)
+    funcs, a, b = validateSolveInput(funcs, a, b)
+    # Every precision runs the same solver, generic over its number type: the one that used to be
+    # Float64-only. It solves sub-boxes by calling itself, so the input above is checked once.
+    T = solveType(roundoff)
+    run() = fast_solve(funcs, a, b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact,
+                       minBoundingIntervalSize=minBoundingIntervalSize, _refine=_refine, _maxDegree=_maxDegree,
+                       numtype=T)
+    # BigFloat's precision is a global setting; it is set only for this solve, not left changed for the caller.
+    return T === BigFloat ? setprecision(run, BigFloat, roundoff) : run()
 end

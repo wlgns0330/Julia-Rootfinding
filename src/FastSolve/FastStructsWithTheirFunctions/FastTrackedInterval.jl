@@ -25,39 +25,45 @@ possibleExtraRoot: bool
 nextTransformPoints: array
     Where the midpoint of the next subdivision should be for each dimension
 """
-mutable struct FastTrackedInterval 
+mutable struct FastTrackedInterval{T<:AbstractFloat}
 
     # This struct is implemented by passing in one argument "interval"
     # eg: TrackedInterval([-1;-3.4;0])
-    topInterval::Matrix{Float64}
-    interval::Matrix{Float64}
-    transforms::Vector{Matrix{Float64}}
+    # T is the number type the solve runs in (Float64 by default; Float32, Float16 or BigFloat for
+    # other roundoff settings). Every field is concrete in T, so the solver compiles to fast code
+    # for each type instead of looking types up at run time.
+    topInterval::Matrix{T}
+    interval::Matrix{T}
+    transforms::Vector{Matrix{T}}
     ndim::Int
     empty::Bool
     finalStep::Bool
     canThrowOutFinalStep::Bool
-    possibleDuplicateRoots::Vector{Vector{Float64}}
+    possibleDuplicateRoots::Vector{Vector{T}}
     possibleExtraRoot::Bool
-    nextTransformPoints::Vector{Float64}
-    preFinalInterval::Matrix{Float64}
-    preFinalTransforms::Vector{Matrix{Float64}}
+    nextTransformPoints::Vector{T}
+    preFinalInterval::Matrix{T}
+    preFinalTransforms::Vector{Matrix{T}}
     reducedDims::Vector{Int}
-    solvedVals::Vector{Float64}
-    finalInterval::Matrix{Float64}
-    finalAlpha::Vector{Float64}
-    finalBeta::Vector{Float64}
+    solvedVals::Vector{T}
+    finalInterval::Matrix{T}
+    finalAlpha::Vector{T}
+    finalBeta::Vector{T}
     reRun::Bool
-    root::Vector{Float64}
-    function FastTrackedInterval(interval::AbstractMatrix)
-        m = Matrix{Float64}(interval)
+    root::Vector{T}
+    function FastTrackedInterval{T}(interval::AbstractMatrix) where {T<:AbstractFloat}
+        m = Matrix{T}(interval)
         ndim = Int(length(m)/2)
-        empty_mat = Matrix{Float64}(undef, 0, 0)
-        new(m, copy(m), Matrix{Float64}[], ndim, false, false, false,
-            Vector{Float64}[], false, fill(0.0394555475981047, ndim),
-            empty_mat, Matrix{Float64}[], Int[], Float64[], empty_mat,
-            Float64[], Float64[], false, Float64[])
+        empty_mat = Matrix{T}(undef, 0, 0)
+        new{T}(m, copy(m), Matrix{T}[], ndim, false, false, false,
+               Vector{T}[], false, fill(T(0.0394555475981047), ndim),
+               empty_mat, Matrix{T}[], Int[], T[], empty_mat,
+               T[], T[], false, T[])
     end
 end
+
+"""A tracked interval in the interval's own floating-point type (Float64 for an integer interval)."""
+FastTrackedInterval(interval::AbstractMatrix) = FastTrackedInterval{float(eltype(interval))}(interval)
 
 """==============================FUNCTIONS FOR TRACKED INTERVAL=============================="""
 
@@ -93,12 +99,12 @@ function fast_addTransform(trackedInterval::FastTrackedInterval, subInterval)
     # into the stored ndim x 2 matrix instead of through six intermediate row vectors and an hcat.
     n = trackedInterval.ndim
     iv = trackedInterval.interval
-    transform = Matrix{Float64}(undef, n, 2)
+    transform = Matrix{eltype(iv)}(undef, n, 2)
     @inbounds for d in 1:n
         a1 = subInterval[1, d]
         b1 = subInterval[2, d]
-        transform[d, 1] = (b1 - a1) / 2.
-        transform[d, 2] = (b1 + a1) / 2.
+        transform[d, 1] = (b1 - a1) / 2
+        transform[d, 2] = (b1 + a1) / 2
     end
     push!(trackedInterval.transforms, transform)
     #Update the lower and upper bounds of the current interval
@@ -107,8 +113,8 @@ function fast_addTransform(trackedInterval::FastTrackedInterval, subInterval)
         # matching the row copies the previous code took before its update loop.
         a2 = iv[1, d]
         b2 = iv[2, d]
-        alpha2 = (b2 - a2) / 2.
-        beta2 = (b2 + a2) / 2.
+        alpha2 = (b2 - a2) / 2
+        beta2 = (b2 + a2) / 2
         for i in 1:2
             x = subInterval[i, d]
             #Be exact if x = +-1
@@ -151,10 +157,10 @@ Returns the transformed interval and its error, both as 2 x ndim matrices (bound
 The arithmetic is the same error-free product and sum the array version did, done one element at
 a time so nothing is allocated per transform. Transform lists get long on deep subdivisions, and
 the array version allocated roughly a dozen 2 x ndim temporaries for each entry."""
-function fast_replayTransforms(topInterval::Matrix{Float64}, transforms::Vector{Matrix{Float64}})
+function fast_replayTransforms(topInterval::Matrix{T}, transforms::Vector{Matrix{T}}) where {T}
     n = Int(length(topInterval) / 2)
-    interval = Matrix{Float64}(undef, 2, n)
-    err = zeros(2, n)
+    interval = Matrix{T}(undef, 2, n)
+    err = zeros(T, 2, n)
     @inbounds for d in 1:n, c in 1:2
         interval[c, d] = topInterval[c, d]
     end
@@ -188,17 +194,17 @@ function fast_getFinalInterval(trackedInterval::FastTrackedInterval)
     finalInterval, finalIntervalError = fast_replayTransforms(trackedInterval.topInterval, transformsToUse)
     n = size(finalInterval, 2)
     trackedInterval.finalInterval = finalInterval + finalIntervalError # Add the error and save the result.
-    finalAlpha = Vector{Float64}(undef, n)
-    finalBeta = Vector{Float64}(undef, n)
+    finalAlpha = Vector{eltype(finalInterval)}(undef, n)
+    finalBeta = Vector{eltype(finalInterval)}(undef, n)
     @inbounds for d in 1:n
-        lo = finalInterval[1, d] / 2.
-        hi = finalInterval[2, d] / 2.
+        lo = finalInterval[1, d] / 2
+        hi = finalInterval[2, d] / 2
         elo = finalIntervalError[1, d]
         ehi = finalIntervalError[2, d]
         alpha, alphaError = fast_twoSumScalar(-lo, hi)
-        finalAlpha[d] = alpha + (alphaError + (ehi - elo) / 2.)
+        finalAlpha[d] = alpha + (alphaError + (ehi - elo) / 2)
         beta, betaError = fast_twoSumScalar(lo, hi)
-        finalBeta[d] = beta + (betaError + (ehi + elo) / 2.)
+        finalBeta[d] = beta + (betaError + (ehi + elo) / 2)
     end
     trackedInterval.finalAlpha = finalAlpha
     trackedInterval.finalBeta = finalBeta
@@ -216,20 +222,20 @@ function fast_getFinalPoint(trackedInterval::FastTrackedInterval)
     if !trackedInterval.finalStep  # If no final step, use the midpoint of the calculated final interval.
         fi = trackedInterval.finalInterval
         n = size(fi, 2)
-        root = Vector{Float64}(undef, n)
+        root = Vector{eltype(fi)}(undef, n)
         @inbounds for d in 1:n
-            root[d] = (fi[1, d] + fi[2, d]) / 2.
+            root[d] = (fi[1, d] + fi[2, d]) / 2
         end
         trackedInterval.root = root
     else  # If using the final step, recalculate the final interval using post-final transforms.
         finalInterval, finalIntervalError = fast_replayTransforms(trackedInterval.topInterval,
                                                                  trackedInterval.transforms)
         n = size(finalInterval, 2)
-        root = Vector{Float64}(undef, n)
+        root = Vector{eltype(finalInterval)}(undef, n)
         @inbounds for d in 1:n
             lo = finalInterval[1, d] + finalIntervalError[1, d]
             hi = finalInterval[2, d] + finalIntervalError[2, d]
-            root[d] = (lo + hi) / 2.  # Return the midpoint
+            root[d] = (lo + hi) / 2  # Return the midpoint
         end
         trackedInterval.root = root
     end
@@ -240,7 +246,7 @@ end
 """Gets the volume of the current interval."""
 function fast_sizeOfInterval(trackedInterval)
     iv = trackedInterval.interval
-    v = 1.0
+    v = one(eltype(iv))
     @inbounds for d in 1:size(iv, 2)
         v *= iv[2, d] - iv[1, d]
     end
@@ -251,7 +257,7 @@ end
 function fast_dimSize(trackedInterval)
     iv = trackedInterval.interval
     n = size(iv, 2)
-    out = Vector{Float64}(undef, n)
+    out = Vector{eltype(iv)}(undef, n)
     @inbounds for d in 1:n
         out[d] = iv[2, d] - iv[1, d]
     end
@@ -262,7 +268,7 @@ end
 function fast_finalDimSize(trackedInterval)
     iv = trackedInterval.finalInterval
     n = size(iv, 2)
-    out = Vector{Float64}(undef, n)
+    out = Vector{eltype(iv)}(undef, n)
     @inbounds for d in 1:n
         out[d] = iv[2, d] - iv[1, d]
     end
@@ -324,7 +330,7 @@ function fast_overlapsWith(trackedInterval::FastTrackedInterval, otherInterval::
 end
 
 """Determines if the current interval has essentially length 0 in each dimension."""
-function fast_isPoint(trackedInterval::FastTrackedInterval, macheps = 2. ^-52)
+function fast_isPoint(trackedInterval::FastTrackedInterval{T}, macheps = eps(T)) where {T}
     iv = trackedInterval.interval
     @inbounds for d in 1:size(iv, 2)
         abs(iv[1, d] - iv[2, d]) < macheps || return false

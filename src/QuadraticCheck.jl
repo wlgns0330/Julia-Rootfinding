@@ -18,7 +18,9 @@ function quadraticCheck2D(test_coeff,tol)
     end
     interval = [[-1, -1], [1, 1]]
 
-    c = 1.0*fill(0,6)
+    # In the coefficients' own type: storing BigFloat coefficients in Float64 rounded them inside a
+    # check that throws regions out, with an error bound far tighter than that rounding.
+    c = zeros(float(eltype(test_coeff)), 6)
     shape = reverse(size(test_coeff))
     c[1] = test_coeff[1,1]
     if shape[1] > 1
@@ -50,8 +52,8 @@ function quadraticCheck2D(test_coeff,tol)
         int_x = (c[3] * c[5] - 4 * c[2] * c[6]) / det
         int_y = (c[2] * c[5] - 4 * c[3] * c[4]) / det
     else                      # det is zero,
-        int_x = Inf
-        int_y = Inf
+        int_x = oftype(c[1], Inf)
+        int_y = oftype(c[1], Inf)
     end
 
     min_satisfied, max_satisfied = false,false
@@ -178,7 +180,9 @@ function quadraticCheck3D(test_coeff,tol)
     end
 
     #Padding is slow, so check the shape instead.
-    c = 1.0*fill(0,10)
+    # In the coefficients' own type: storing BigFloat coefficients in Float64 rounded them inside a
+    # check that throws regions out, with an error bound far tighter than that rounding.
+    c = zeros(float(eltype(test_coeff)), 10)
     shape = reverse(size(test_coeff))
     c[1] = test_coeff[1,1,1]
     if shape[1] > 1
@@ -243,9 +247,9 @@ function quadraticCheck3D(test_coeff,tol)
         int_y = (c[2]*minor_1_2  + c[3]*-fix_y_det + c[4]*minor_2_3)/det
         int_z = (c[2]*-minor_1_3  + c[3]*minor_2_3  + c[4]*-fix_z_det)/det
     else
-        int_x = Inf
-        int_y = Inf
-        int_z = Inf
+        int_x = oftype(c[1], Inf)
+        int_y = oftype(c[1], Inf)
+        int_z = oftype(c[1], Inf)
     end
 
     interval = [[-1, -1, -1], [1, 1, 1]]
