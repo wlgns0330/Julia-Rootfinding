@@ -54,6 +54,7 @@ function test_all_SolveApi()
         test_solve_polynomialOnAnyBox()
         test_solve_validatesInput()
         test_solve_generalPrecisionSeparatesCloseRoots()
+        test_solve_lowPrecisionPolynomialDoesNotRunAway()
     end
 end
 
@@ -486,5 +487,22 @@ function test_solve_generalPrecisionSeparatesCloseRoots()
         expected = sortedRoots([[0.25, 0.25], [0.25 + d / 2, 0.25 - d / 2]])
         @test length(roots) == 2
         @test length(roots) == 2 && all(isapprox(r, e; atol=1e-3 * d) for (r, e) in zip(roots, expected))
+    end
+end
+
+function test_solve_lowPrecisionPolynomialDoesNotRunAway()
+    @testset "low-precision polynomial input does not subdivide without end" begin
+        # Regression test: in Float16 these polynomials are swamped by their rounding error along their
+        # zero curves, and carrying them onto smaller boxes keeps the error while shrinking the
+        # polynomials, so solve cut the interval up for minutes. It now returns such a box whole; the
+        # answer is coarse, but every root must lie in a returned box.
+        parabola = zeros(3, 2); parabola[1, 2] = 1; parabola[3, 1] = -1          # y - x^2
+        cubic = zeros(4, 2); cubic[1, 2] = 1; cubic[4, 1] = -1; cubic[2, 1] = 0.5  # y - x^3 + x/2
+        r = (1 - sqrt(3)) / 2
+        expected = [[0.0, 0.0], [r, r^2]]
+        roots, boxes = YRoots.solve([YRoots.MultiPower(parabola), YRoots.MultiPower(cubic)], [-1.0, -1.0], [1.0, 1.0];
+                                    roundoff=11, returnBoundingBoxes=true)
+        @test length(roots) == length(boxes)
+        @test all(any(all(box[1, :] .<= e .<= box[2, :]) for box in boxes) for e in expected)
     end
 end

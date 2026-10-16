@@ -119,6 +119,17 @@ neighborhood, with an error that shrinks with the function's size there, and is 
 allPolynomial(funcs) = all(f isa MultiPower || f isa MultiCheb for f in funcs)
 
 """
+Whether the Chebyshev polynomial `coeffs`, with error bound `err`, is swamped by its error on its region:
+whether the error is at least the most the polynomial can vary there (the sum of its non-constant
+coefficients), so that it cannot be told apart from a constant anywhere on the region.
+
+Carried onto a smaller region, a polynomial varies less while its error bound stays the same, so a
+swamped polynomial stays swamped on every part of the region, and cutting the region up cannot locate
+its roots. This is what happens to polynomial input in Float32 and Float16 near its zero curves.
+"""
+swampedByError(coeffs, err) = err >= sum(abs, coeffs) - abs(coeffs[1])
+
+"""
 The roots and boxes one final box of the subdivision solve contributes, in the original coordinates,
 as an entry `(roots, boxes, isWide)` for `_refineWideBoxes`.
 
@@ -272,6 +283,16 @@ function fast_solve(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingI
     #If the bounding box is the entire interval, subdivide it!
     usingSubdivision = all(b-a .> minBoundingIntervalSize)
     if length(boundingBoxes) == 1 && all(fast_finalDimSize(boundingBoxes[1]) .== 2) && usingSubdivision
+        # A polynomial swamped by its error stays swamped on every part of the interval (see
+        # swampedByError), so subdividing would only tile it down to minBoundingIntervalSize and return
+        # every tile as a root: in Float32, 3,830 roots for 4 on one system and a run that never ended on
+        # another. Return the interval as one box instead.
+        if allPolynomial(funcs) && any(swampedByError(polys[i], errs[i]) for i in 1:dim)
+            @warn "Part of the interval cannot be resolved at this precision; it is returned as one bounding box." maxlog=1
+            box = permutedims(hcat(a, b))
+            root = (a .+ b) ./ 2
+            return returnBoundingBoxes ? (Any[root], Any[box]) : Any[root]
+        end
         #Subdivide the interval and resolve to get better resolution across different parts of the interval
         yroots, boundingBoxes = [], []
         for val in Iterators.product(Iterators.repeated(([false,true]), length(a))...)
