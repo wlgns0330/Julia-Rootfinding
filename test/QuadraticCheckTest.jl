@@ -1,4 +1,4 @@
-include("../src/QuadraticCheck.jl")
+using YRoots: get_fixed_vars, quadraticCheck, quadraticCheck2D, quadraticCheck3D, quadraticCheckND
 using Test
 
 # Tests for QuadraticCheck.jl, reworked from tests/test_QuadraticCheck.py in

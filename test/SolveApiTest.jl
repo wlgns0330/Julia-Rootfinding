@@ -5,8 +5,7 @@ using Test
 #
 # Ported from tests/test_solve_api.py, tests/test_bounding_boxes.py and
 # tests/test_known_failures.py in wlgns0330/Rootfinding-serial, keeping the cases that
-# apply to this port. Everything here goes through the exported `solve`, so it exercises
-# whichever path the default `roundoff` selects (currently fast_solve) rather than the
+# apply to this port. Everything here goes through the exported `solve` rather than the
 # internals -- the internals are covered by the per-module test files.
 #
 # The functions are given as callables throughout, deliberately: MultiPower and MultiCheb
@@ -44,11 +43,11 @@ function test_all_SolveApi()
         test_solve_doesNotModifyInputs()
         test_solve_polynomialInputAtAnyScale()
         test_polynomialRoundingError()
-        test_fast_trimMs_keepsATinyPolynomial()
+        test_trimMs_keepsATinyPolynomial()
         test_solve_closeRootsOffTheAxes()
         test_solve_doubleRootReportedOnce()
         test_solve_closeRootsOfANoisyFunctionDoNotHang()
-        test_fast_chebApproximate_stopsAtMaxDegree()
+        test_chebApproximate_stopsAtMaxDegree()
         test_subdivisionPoint_staysInsideTheInterval()
         test_solve_oneBoxPerRoot()
         test_solve_polynomialOnAnyBox()
@@ -318,13 +317,13 @@ function test_polynomialRoundingError()
     end
 end
 
-function test_fast_trimMs_keepsATinyPolynomial()
-    @testset "fast_trimMs does not trim a polynomial below order 1" begin
+function test_trimMs_keepsATinyPolynomial()
+    @testset "trimMs does not trim a polynomial below order 1" begin
         # Regression test: with a fixed 2^-52 allowance every coefficient row of a polynomial
         # scaled to 1e-20 fit under it, so this was trimmed to the 3 coefficients kept at minimum.
         Ms = [1e-20 .* [1.0, 0.5, 0.25, 0.125, 0.0625]]
         errors = [0.0]
-        YRoots.fast_trimMs(Ms, errors)
+        YRoots.trimMs(Ms, errors)
         @test length(Ms[1]) == 5
         @test errors == [0.0]
     end
@@ -370,11 +369,11 @@ function test_solve_closeRootsOfANoisyFunctionDoNotHang()
     end
 end
 
-function test_fast_chebApproximate_stopsAtMaxDegree()
-    @testset "fast_chebApproximate stops at maxDegree" begin
+function test_chebApproximate_stopsAtMaxDegree()
+    @testset "chebApproximate stops at maxDegree" begin
         f = (x, y) -> cos(60 * x) + y
-        @test_throws YRoots.DegreeCapExceeded YRoots.fast_chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=32)
-        approx, _ = YRoots.fast_chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=1000)
+        @test_throws YRoots.DegreeCapExceeded YRoots.chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=32)
+        approx, _ = YRoots.chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=1000)
         @test maximum(size(approx)) > 32
     end
 end
@@ -391,7 +390,7 @@ function test_subdivisionPoint_staysInsideTheInterval()
             @test all(a .< p .< b)
             @test p ≈ a .+ frac .* (b .- a)
         end
-        # The general-precision solver passes its own float type through unchanged.
+        # A BigFloat solve's float type passes through unchanged.
         p = YRoots.subdivisionPoint(BigFloat[-100, -100], BigFloat[-99, -99], BigFloat(frac))
         @test eltype(p) == BigFloat
         @test all(-100 .< p .< -99)
@@ -480,7 +479,7 @@ function test_solve_generalPrecisionSeparatesCloseRoots()
     @testset "solve at other precisions separates close roots" begin
         # Regression test: above 53 bits of roundoff, solve lost both roots of this pair. The
         # approximation is built in Float64, but only rounding at the solve's own precision was
-        # allowed for. It also did not approximate again around a wide box, as the Float64 path does.
+        # allowed for. It also did not approximate again around a wide box, as Float64 solves did.
         d = 1e-9
         roots = sortedRoots(YRoots.solve([(x, y) -> (x - y) * (x - y - d), (x, y) -> x + y - 0.5],
                                          [-1.0, -1.0], [1.0, 1.0]; roundoff=80))

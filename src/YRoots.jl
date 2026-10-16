@@ -12,13 +12,6 @@ include("QuadraticCheck.jl")
 include("ChebyshevApproximator.jl")
 include("ChebyshevSubdivisionSolver.jl")
 include("StructsWithTheirFunctions/Polynomial.jl")
-
-include("FastSolve/FastStructsWithTheirFunctions/FastSolverOptions.jl")
-include("FastSolve/FastStructsWithTheirFunctions/FastTrackedInterval.jl")
-include("FastSolve/FastChebyshevApproximator.jl")
-include("FastSolve/FastChebyshevSubdivisionSolver.jl")
-include("FastSolve/FastCombinedSolver.jl")
-
 include("CombinedSolver.jl")
 
 export solve, MultiPower, MultiCheb, eval_MultiPower, eval_MultiCheb

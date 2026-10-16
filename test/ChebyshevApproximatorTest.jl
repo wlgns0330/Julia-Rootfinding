@@ -1,4 +1,5 @@
-include(joinpath(@__DIR__, "..", "src", "ChebyshevApproximator.jl"))
+using YRoots: chebApproximate, checkConstantInDimension, createMeshgrid, getApproxError, getChebyshevDegrees,
+    getFinalDegree, hasConverged, intervalApproximateND, startedConverging, transformPoints
 using Test
 
 function test_all_ChebyshevApproximator()
@@ -406,13 +407,18 @@ function test_getChebyshevDegrees()
         # Python reports the same degrees, the same dimension-2 epsilon and rho to the last digit,
         # and agrees on dimensions 1 and 3 to about 1%; that residual is pre-existing FFT/ordering
         # noise between the two languages, not an effect of this change.
+        # The same noise separates implementations within Julia: z is linear, so dimension 3's
+        # epsilon and rho are measured on rounding noise alone and move by about 1% with the order
+        # of the arithmetic. They are checked to 2%, the other dimensions to the default tolerance.
         expected_cheb_degs3 = [41; 20; 1]
         expected_epsilons3 = [6.039948846877454e-17; 7.686211676761757e-17; 8.923054546214647e-17]
         expected_rhos3 = [2.3202587723203254; 5.383600770529424; 4.0156736844924405e7]
         cheb_degs3, epsilons3, rhos3 = getChebyshevDegrees(f3, a3, b3, relApproxTol)
         @test isapprox(expected_cheb_degs3, cheb_degs3)
-        @test isapprox(expected_epsilons3, epsilons3)
-        @test isapprox(expected_rhos3, rhos3)
+        @test isapprox(expected_epsilons3[1:2], epsilons3[1:2])
+        @test isapprox(expected_epsilons3[3], epsilons3[3]; rtol=2e-2)
+        @test isapprox(expected_rhos3[1:2], rhos3[1:2])
+        @test isapprox(expected_rhos3[3], rhos3[3]; rtol=2e-2)
         # f4 = (x1, x2, x3, x4) -> 1 + 7 * sin(1 / (13 * x2)) + 7 * x3 + x4
         # a4 = [-10; 7e-5; -4.3; -2]
         # b4 = [5; 2.3; 11/9; 1]

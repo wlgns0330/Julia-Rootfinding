@@ -95,7 +95,7 @@ Both types also evaluate directly, via `eval_MultiPower` and `eval_MultiCheb`.
 | `returnBoundingBoxes` | `false` | Return `(roots, boundingBoxes)` instead of just the roots. |
 | `exact` | `false` | Run the transformations in higher precision — more accurate, slower. |
 | `minBoundingIntervalSize` | `1e-5` | Re-solve on a smaller interval while a root's box exceeds this size. |
-| `roundoff` | `53` | Bits of precision. `53` selects `Float64` and the fast solver; `<= 24` `Float32`, `<= 11` `Float16`, above `53` `BigFloat`. |
+| `roundoff` | `53` | Bits of precision. `53` selects `Float64`; `<= 24` `Float32`, `<= 11` `Float16`, above `53` `BigFloat`. |
 
 See the [`solve` reference](https://wlgns0330.github.io/Julia-Rootfinding/solve/) for the
 details.
@@ -125,10 +125,10 @@ src/
   ChebyshevSubdivisionSolver.jl the subdivision solver over Chebyshev coefficients
   QuadraticCheck.jl             exclusion test that discards root-free subintervals
   StructsWithTheirFunctions/    SolverOptions, TrackedInterval, MultiCheb/MultiPower
-  FastSolve/                    the Float64 fast path, used by default (roundoff = 53)
 test/
   runtests.jl                   runs every suite; what CI runs
-  ChebfunTests/                 accuracy comparison against Chebfun's published results
+  ChebfunSuiteTest.jl           the Chebfun2 benchmark systems, checked against reference roots
+  ChebfunTests/                 those systems, their reference roots, and Chebfun2's own results
 docs/                           Documenter site published to GitHub Pages
 ```
 

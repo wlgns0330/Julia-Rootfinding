@@ -1,4 +1,4 @@
-include("../src/StructsWithTheirFunctions/Polynomial.jl")
+using YRoots: MultiCheb, MultiPower, eval_MultiPower
 using Test
 
 function test_all_Polynomial()

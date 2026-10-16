@@ -1,29 +1,9 @@
-# TrackedInterval.jl does not stand alone: getFinalInterval calls twoProd, which lives in
-# ChebyshevSubdivisionSolver.jl. Including the solver pulls in TrackedInterval.jl itself
-# (and SolverOptions.jl and QuadraticCheck.jl) transitively, so this covers both.
-# These were previously pulled in as a side effect of including ChebyshevSubdivisionSolver.jl,
-# which used to include its own dependencies. Those includes now live in YRoots.jl, so a test
-# that loads a source file directly has to name what that file needs.
-include(joinpath(@__DIR__, "..", "src", "StructsWithTheirFunctions", "SolverOptions.jl"))
-include(joinpath(@__DIR__, "..", "src", "StructsWithTheirFunctions", "TrackedInterval.jl"))
-include(joinpath(@__DIR__, "..", "src", "QuadraticCheck.jl"))
-include(joinpath(@__DIR__, "..", "src", "ChebyshevSubdivisionSolver.jl"))
+using YRoots: TrackedInterval, addTransform, contains, copyInterval, getFinalInterval, getFinalPoint,
+    getIntervalForCombining, isPoint, overlapsWith, startFinalStep
 using Test
-
-# TrackedInterval.jl reads two globals that solve() normally sets on the way in
-# (CombinedSolver.jl sets `type` and `precision` from its `roundoff` argument). Nothing
-# in this file goes through solve(), so they are set here. Without them the constructor
-# throws UndefVarError on `type` at TrackedInterval.jl:53 and every test in this file
-# errors -- which is what happened whenever this suite ran before
-# ChebyshevSubdivisionSolverTest.jl, the only other file that sets them.
-function setupTrackedIntervalGlobals()
-    global type = Float64
-    global precision = 53
-end
 
 function test_all_TrackedInterval()
     @testset "All tests in TrackedIntervalTest.jl" begin
-        setupTrackedIntervalGlobals()
         test_copyInterval()
         test_addTransform()
         test_constructorDoesNotAlias()
@@ -59,16 +39,16 @@ function test_copyInterval()
         @test copiedInterval_2.finalStep == false
         @test copiedInterval_2.possibleDuplicateRoots == []
         @test copiedInterval_2.possibleExtraRoot == false
-        @test copiedInterval_2.preFinalInterval == []
+        @test isempty(copiedInterval_2.preFinalInterval)
         @test copiedInterval_2.preFinalTransforms == []
         trackedInterval_1.finalStep = true
-        trackedInterval_1.possibleDuplicateRoots = [3,1,2]
+        trackedInterval_1.possibleDuplicateRoots = [[3.,1.,2.]]
         trackedInterval_1.possibleExtraRoot = true
         trackedInterval_1.preFinalInterval = [1;2;;-1;1;;-3;2]
         trackedInterval_1.preFinalTransforms = [[1;2;;-1;1;;-3;2]]
         copiedInterval_3 = copyInterval(trackedInterval_1)
         @test copiedInterval_3.finalStep == true
-        @test copiedInterval_3.possibleDuplicateRoots == [3,1,2]
+        @test copiedInterval_3.possibleDuplicateRoots == [[3.,1.,2.]]
         @test copiedInterval_3.possibleExtraRoot == true
         @test copiedInterval_3.preFinalInterval == [1;2;;-1;1;;-3;2]
         @test copiedInterval_3.preFinalTransforms == [[1;2;;-1;1;;-3;2]]
@@ -165,7 +145,7 @@ function test_getIntervalForCombining()
     @testset "getIntervalForCombining unit tests" begin
         trackedInterval = TrackedInterval([-1;1;;-1.2332;1.2134;;-5;1])
         @test isapprox(getIntervalForCombining(trackedInterval),[-1;1;;-1.2332;1.2134;;-5;1])
-        @test trackedInterval.preFinalInterval == []
+        @test isempty(trackedInterval.preFinalInterval)
         trackedInterval.preFinalInterval = [-5;5;;-1;1;;500;1]
         trackedInterval.finalStep = true
         @test isapprox(getIntervalForCombining(trackedInterval),[-5;5;;-1;1;;500;1])
@@ -333,10 +313,10 @@ function test_startFinalStep()
     @testset "startFinalStep unit tests" begin
         tInterval_1 = TrackedInterval([1;2;;-1;1])
         @test tInterval_1.finalStep == false
-        tInterval_1.transforms = [3;1;2;1;;4;1;2;3]
+        tInterval_1.transforms = [[3;1;2;1;;4;1;2;3]]
         startFinalStep(tInterval_1)
         @test tInterval_1.finalStep == true
         @test isapprox(tInterval_1.preFinalInterval,[1;2;;-1;1])
-        @test isapprox(tInterval_1.preFinalTransforms,[3;1;2;1;;4;1;2;3])
+        @test isapprox(tInterval_1.preFinalTransforms,[[3;1;2;1;;4;1;2;3]])
     end
 end

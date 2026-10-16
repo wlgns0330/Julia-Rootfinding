@@ -1,10 +1,8 @@
-# These were previously pulled in as a side effect of including ChebyshevSubdivisionSolver.jl,
-# which used to include its own dependencies. Those includes now live in YRoots.jl, so a test
-# that loads a source file directly has to name what that file needs.
-include(joinpath(@__DIR__, "..", "src", "StructsWithTheirFunctions", "SolverOptions.jl"))
-include(joinpath(@__DIR__, "..", "src", "StructsWithTheirFunctions", "TrackedInterval.jl"))
-include(joinpath(@__DIR__, "..", "src", "QuadraticCheck.jl"))
-include(joinpath(@__DIR__, "..", "src", "ChebyshevSubdivisionSolver.jl"))
+using YRoots: SolverOptions, TrackedInterval, TransformChebInPlaceND, boundingIntervalLinearSystem, getFinalPoint,
+    getInverseOrder, getLastTransform, getLinearTerms, getSubdivisionDims, getSubdivisionIntervals,
+    getTransformationError, isExteriorInterval, linearCheck1, reduceSolvedDim, solveChebyshevSubdivision,
+    solvePolyRecursive, transformCheb, transformChebInPlace1D, transformChebToInterval, trimMs,
+    zoomInOnIntervalIter
 using Test
 
 # ---------------------------------------------------------------------------------
@@ -79,8 +77,6 @@ systemResidual(Ms, pt) = maximum(abs(evalChebTensor(M, collect(pt))) for M in Ms
 
 
 function test_all_ChebyshevSubdivisionSolver()
-    global type = Float64
-    global precision = 53
     @testset "All tests in ChebyshevSubdivisionSolverTest.jl" begin
         test_getLinearTerms()
         test_linearCheck1()
@@ -104,14 +100,12 @@ function test_all_ChebyshevSubdivisionSolver()
 end
 
 function test_getLinearTerms()
-    global type = Float64
-    global precision = 53
     @testset "getLinearTerms unit tests" begin
-        M_1 = reshape(collect(0:15),(2,2,2,2))
+        M_1 = reshape(collect(0.0:15),(2,2,2,2))
         A_1_expected = [8; 4; 2; 1]
         @test isapprox(A_1_expected,getLinearTerms(M_1))
 
-        M_2 = reshape(collect(0:15),(2,2,4))
+        M_2 = reshape(collect(0.0:15),(2,2,4))
         A_2_expected = [4; 2; 1]
         @test isapprox(A_2_expected,getLinearTerms(M_2))
 
@@ -119,11 +113,11 @@ function test_getLinearTerms()
         A_3_expected = [12.2]
         @test isapprox(A_3_expected,getLinearTerms(M_3))
         
-        M_4 = reshape(collect(0:(2*15*4*6-1)),(6,4,15,2))
+        M_4 = reshape(collect(0.0:(2*15*4*6-1)),(6,4,15,2))
         A_4_expected = [360; 24; 6; 1]
         @test isapprox(A_4_expected,getLinearTerms(M_4))
 
-        M_5 = reshape(collect(0:(3*4-1)),(4,1,3))
+        M_5 = reshape(collect(0.0:(3*4-1)),(4,1,3))
         A_5_expected = [4; 0; 1]
         @test isapprox(A_5_expected,getLinearTerms(M_5))
 
@@ -132,8 +126,6 @@ function test_getLinearTerms()
 end
 
 function test_linearCheck1()
-    global type = Float64
-    global precision = 53
     @testset "linearCheck1 unit tests" begin
         A1 = [-1.12215095; -0.10896646; -0.20570858;;
                 1.61496991;  0.36087537;  0.70263142;;
@@ -222,8 +214,6 @@ function test_linearCheck1()
 end
 
 function test_reduceSolvedDim()
-    global type = Float64
-    global precision = 53
     @testset "reduceSolvedDim unit tests" begin 
         # 2d case
         Ms_1 = [[3.1;-2;34;.000001;.0002;;4;1;2;.0002;.0102], [9.836;3.1;-.031;.001;-.045;.00002;;15.2344;42.234;2;4;3;.0023]]
@@ -266,7 +256,7 @@ function test_reduceSolvedDim()
         @test ([-0.00000000000000015000] == new_trackedInterval_2.solvedVals)
 
         # 5d case 
-        Ms_3 = [reshape(collect(0:2*3*3*2*1-1),(1,2,3,3,2)),reshape(collect(0:3*2*2*2*2-1),(2,2,2,2,3)),reshape(collect(0:4*1*2*2*3-1),(3,2,2,1,4)),reshape(collect(0:5*4*2*1*1-1),(1,1,2,4,5)),reshape(collect(0:3*3*3*3*3-1),(3,3,3,3,3))]
+        Ms_3 = [reshape(collect(0.0:2*3*3*2*1-1),(1,2,3,3,2)),reshape(collect(0.0:3*2*2*2*2-1),(2,2,2,2,3)),reshape(collect(0.0:4*1*2*2*3-1),(3,2,2,1,4)),reshape(collect(0.0:5*4*2*1*1-1),(1,1,2,4,5)),reshape(collect(0.0:3*3*3*3*3-1),(3,3,3,3,3))]
         errors_3 = [.00014122;.000121;.0007310102;.00839;.00004173]
         trackedInterval_3 = TrackedInterval([4;19;;-2e-16;-1e-16;;-3;-1e-16;;-4;5;;2;3])
         trackedInterval_3.reducedDims = [5]
@@ -294,7 +284,7 @@ function test_reduceSolvedDim()
         @test ([4.123123123;.20039994;-1.5e-16] == new_trackedInterval_3.solvedVals)
         
         # 5d pt.2
-        Ms_4 = [reshape(collect(0:2*3*3*2*1-1),(1,2,3,3,2)).^2,reshape(collect(0:3*2*2*2*2-1),(2,2,2,2,3)).^2,reshape(collect(0:4*1*2*2*3-1),(3,2,2,1,4)).^2,reshape(collect(0:5*4*2*1*1-1),(1,1,2,4,5)).^2,reshape(collect(0:3*3*3*3*3-1),(3,3,3,3,3)).^2]
+        Ms_4 = [reshape(collect(0.0:2*3*3*2*1-1),(1,2,3,3,2)).^2,reshape(collect(0.0:3*2*2*2*2-1),(2,2,2,2,3)).^2,reshape(collect(0.0:4*1*2*2*3-1),(3,2,2,1,4)).^2,reshape(collect(0.0:5*4*2*1*1-1),(1,1,2,4,5)).^2,reshape(collect(0.0:3*3*3*3*3-1),(3,3,3,3,3)).^2]
         errors_4 = [.00014122;.000121;.0007310102;.00839;.00004173]
         trackedInterval_4 = TrackedInterval([4;19;;-2e-16;-1e-16;;-3;-1e-16;;-4;5;;2;3])
         trackedInterval_4.reducedDims = [5]
@@ -326,8 +316,6 @@ function test_reduceSolvedDim()
 end
 
 function test_transformChebInPlace1D()
-    global type = Float64
-    global precision = 53
     @testset "transformChebInPlace1D unit tests" begin
         alpha_1 = 0.8043138619259216
         beta_1 = 0.19568613807407842
@@ -688,8 +676,6 @@ function test_transformChebInPlace1D()
 end
 
 function test_transformChebInPlaceND()
-    global type = Float64
-    global precision = 53
     @testset "transformChebInPlaceND unit tests" begin
         alpha_1 = 0.8043138619259216
         beta_1 = 0.19568613807407842
@@ -812,7 +798,7 @@ function test_transformChebInPlaceND()
         alpha_9 = 1.2837492384
         beta_9 = .7234444321123415
         dim_9 = 5
-        coeffs_9 = reshape(collect(0:4*2*4*3*4*3-1),(3,4,3,4,2,4))
+        coeffs_9 = reshape(collect(0.0:4*2*4*3*4*3-1),(3,4,3,4,2,4))
         transformed_coeffs_9 = TransformChebInPlaceND(coeffs_9,dim_9,alpha_9,beta_9,false)
         @test isapprox(transformed_coeffs_9[3,4,3,4,2,4], 2435.0950647445447)
         @test isapprox(transformed_coeffs_9[1,1,1,1,1,1], 70.81780444042236410951)
@@ -825,7 +811,7 @@ function test_transformChebInPlaceND()
         alpha_10 = 1.2837492384
         beta_10 = .7234444321123415
         dim_10 = 3
-        coeffs_10 = reshape(collect(0:4*2*4*3*4*3-1),(3,4,3,4,2,4))   
+        coeffs_10 = reshape(collect(0.0:4*2*4*3*4*3-1),(3,4,3,4,2,4))   
         transformed_coeffs_10 = TransformChebInPlaceND(coeffs_10,dim_10,alpha_10,beta_10,false)
         @test isapprox(2435.09506474454474300728,transformed_coeffs_10[3,4,3,4,2,4])
         @test isapprox(849.81365328506842615752,transformed_coeffs_10[1,1,1,1,1,1])
@@ -841,7 +827,7 @@ function test_transformChebInPlaceND()
         alpha_11 = 3.456654
         beta_11 = .451324
         dim_11 = 3
-        coeffs_11 = reshape(collect(0:3*2*1*2-1),(2,1,2,3))
+        coeffs_11 = reshape(collect(0.0:3*2*1*2-1),(2,1,2,3))
         expected_transformed_coeffs_11 = coeffs_11
         transformed_coeffs_11 = TransformChebInPlaceND(coeffs_11,dim_11,alpha_11,beta_11,false)
         @test isapprox(transformed_coeffs_11,expected_transformed_coeffs_11)
@@ -849,8 +835,6 @@ function test_transformChebInPlaceND()
 end
 
 function test_getTransformationError()
-    global type = Float64
-    global precision = 53
     @testset "getTransformationError unit tests" begin
         M_1 = [0; -.939093750; 0; -.0138146058; -.00106830799; -.0137307266;;
                 0; -1.05695980; 0; -.0149230031; .00237984138; -.0298460061;;
@@ -878,7 +862,7 @@ function test_getTransformationError()
         @test isapprox(expected_error_2a,getTransformationError(M_2,dim_2a),atol = 2^-52)
         @test isapprox(expected_error_2b,getTransformationError(M_2,dim_2b),atol = 2^-52)
 
-        M_3 = reshape(collect(0:4*2*4*3*4*3-1),(3,4,3,4,2,4))
+        M_3 = reshape(collect(0.0:4*2*4*3*4*3-1),(3,4,3,4,2,4))
         dim_3a = 1
         dim_3b = 2
         dim_3c = 3
@@ -903,7 +887,7 @@ function test_getTransformationError()
         expected_error_4 = 0.00000000000001065814
         @test isapprox(expected_error_4,getTransformationError(M_4,dim_4),atol = 2^-52)
 
-        M_5 = reshape(collect(0:3*2*1*2-1),(2,1,2,3))
+        M_5 = reshape(collect(0.0:3*2*1*2-1),(2,1,2,3))
         dim_5a = 1
         dim_5b = 2
         dim_5c = 3
@@ -917,8 +901,6 @@ function test_getTransformationError()
 end
 
 function test_transformCheb()
-    global type = Float64
-    global precision = 53
     @testset "test_transformCheb unit tests" begin
         M_1 = [-4.51013026e-01;  9.19663154e-02;  3.28195239e-03; -1.11200236e-04;
                         -1.98249324e-06;  4.02883056e-08;  4.78752802e-10; -6.94867420e-12;
@@ -1029,7 +1011,7 @@ function test_transformCheb()
         @test isapprox(expected_M_3,M_3o)
         @test isapprox(expected_error_3,error_3o,atol=2^-52)
 
-        M_4 = reshape(collect(0:3*2*1*2-1),(2,1,2,3))
+        M_4 = reshape(collect(0.0:3*2*1*2-1),(2,1,2,3))
         alphas_4 = [0;.452345;1.2345;.231122]
         betas_4 = [.2345;.23223;.7134334;0]
         error_4 = 0.000000000000322211385
@@ -1042,7 +1024,7 @@ function test_transformCheb()
         @test isapprox(expected_error_4,error_4o)
         @test isapprox(expected_M_4,M_4o)
 
-        M_5 = reshape(collect(0:3*2*1*2-1),(2,1,2,3))
+        M_5 = reshape(collect(0.0:3*2*1*2-1),(2,1,2,3))
         alphas_5 = [.34352340;1;1.2345;.231122]
         betas_5 = [.2345;0;.7134334;0]
         error_5 = 0.000000000000322211385
@@ -1060,8 +1042,6 @@ function test_transformCheb()
 end
 
 function test_transformChebToInterval()
-    global type = Float64
-    global precision = 53
     @testset "transformChebToInterval unit tests" begin
         macheps = 2^-52
         Ms_1 = [[ 0.87538780085034118006; 1.36733727263328685986; -0.20667177063640954082; -0.04896263625573957917; 0.00360945024389840467; 0.00050772958892000960; -0.00002481750254547087; -0.00000248561588318162; 0.00000009093565308793; 0.00000000707398165416; -0.00000000020683624682; -0.00000000001315504499; 0.00000000000032036243; 0.00000000000001723239; -0.00000000000000035961]]
@@ -1224,7 +1204,7 @@ function test_transformChebToInterval()
         @test isapprox(Ms_3o[3][2,2,2], -0.00000000000000000027,atol=macheps)
         @test (3, 3, 3) == size(Ms_3o[3])
 
-        Ms_4 = [reshape(collect(0:3*2*2*3-1),(3,2,2,3)),reshape(collect(0:3*3*2*3-1),(3,2,3,3)),reshape(collect(1:4*2*2*2),(2,2,2,4)),reshape(collect(0:4*2*2*2-1),(2,2,2,4))]
+        Ms_4 = [reshape(collect(0.0:3*2*2*3-1),(3,2,2,3)),reshape(collect(0.0:3*3*2*3-1),(3,2,3,3)),reshape(collect(1.0:4*2*2*2),(2,2,2,4)),reshape(collect(0.0:4*2*2*2-1),(2,2,2,4))]
         alphas_4 = [0.73688366977641883704; 0.95966057059377973815; 0.15397785734628577359;.293846263523452]
         betas_4 = [.199884327734;0.26311633022358116296; -0.04033942940622026185; -0.84602214265371422641]
         errors_4 = [.00000234789324;.000000000000004234;.000233333334;.00000009234324]
@@ -1280,13 +1260,11 @@ function test_transformChebToInterval()
 end
 
 function test_getSubdivisionDims()
-    global type = Float64
-    global precision = 53
     @testset "getSubdivisionDims unit tests" begin
         trackedInterval_1 = TrackedInterval([-0.63673497;  0.75388677;;
                                              -1.;          0.24771388;;
                                              -1.;          1.        ])
-        Ms_1 = [reshape(collect(0:4*2*3-1),(3,2,4)),reshape(collect(0:5*6*2-1),(2,6,5)),reshape(collect(0:3*3*3-1),(3,3,3))]
+        Ms_1 = [reshape(collect(0.0:4*2*3-1),(3,2,4)),reshape(collect(0.0:5*6*2-1),(2,6,5)),reshape(collect(0.0:3*3*3-1),(3,3,3))]
         level_1 = 1
         expected_allDims_1 = [1; 3; 2;;
                                         2; 1; 3;;
@@ -1296,7 +1274,7 @@ function test_getSubdivisionDims()
         trackedInterval_2 = TrackedInterval([ 0.1110769;   0.11932933;;
                                                         -1.;         -0.99371914;;
                                                         -0.87726429; -0.85851422])
-        Ms_2 = [reshape(collect(0:4*2*3-1),(3,2,4)),reshape(collect(0:5*6*2-1),(2,6,5)),reshape(collect(0:3*3*3-1),(3,3,3))]
+        Ms_2 = [reshape(collect(0.0:4*2*3-1),(3,2,4)),reshape(collect(0.0:5*6*2-1),(2,6,5)),reshape(collect(0.0:3*3*3-1),(3,3,3))]
         level_2 = 7
         expected_allDims_2 = [1; 3; 2;;
                                         2; 1; 3;;
@@ -1306,7 +1284,7 @@ function test_getSubdivisionDims()
         trackedInterval_3 = TrackedInterval([ 0.08600977;  0.1526489 ;;
                                                         -1.;         -1+1e-5;;
                                                         -0.95417107; -0.80126711])
-        Ms_3 = [reshape(collect(0:4*2*3-1),(3,2,4)),reshape(collect(0:5*6*2-1),(2,6,5)),reshape(collect(0:3*3*3-1),(3,3,3))]
+        Ms_3 = [reshape(collect(0.0:4*2*3-1),(3,2,4)),reshape(collect(0.0:5*6*2-1),(2,6,5)),reshape(collect(0.0:3*3*3-1),(3,3,3))]
         level_3 = 4
         expected_allDims_3 = [1; 3;;
                                         1; 3;;
@@ -1316,7 +1294,7 @@ function test_getSubdivisionDims()
         trackedInterval_3a = TrackedInterval([ 0.08600977;  0.1526489 ;;
                                                         -1.;         -.9;;
                                                         -0.95417107; -0.80126711])
-        Ms_3a = [reshape(collect(0:4*2*3-1),(3,2,4)),reshape(collect(0:5*6*2-1),(2,6,5)),reshape(collect(0:3*3*3-1),(3,3,3))]
+        Ms_3a = [reshape(collect(0.0:4*2*3-1),(3,2,4)),reshape(collect(0.0:5*6*2-1),(2,6,5)),reshape(collect(0.0:3*3*3-1),(3,3,3))]
         level_3a = 4
         expected_allDims_3a = [1; 3; 2;;
                                         2; 1; 3;;
@@ -1326,14 +1304,14 @@ function test_getSubdivisionDims()
         trackedInterval_3b = TrackedInterval([ 0.08600977;  0.1526489 ;;
                                                             -1.;        -1+1e-5;;
                                                             -0.95417107; -0.80126711])
-        Ms_3b = [reshape(collect(0:4*2*3-1),(3,2,4)),reshape(collect(0:5*6*2-1),(2,6,5)),reshape(collect(0:3*3*3-1),(3,3,3))]
+        Ms_3b = [reshape(collect(0.0:4*2*3-1),(3,2,4)),reshape(collect(0.0:5*6*2-1),(2,6,5)),reshape(collect(0.0:3*3*3-1),(3,3,3))]
         level_3b = 6
         expected_allDims_3b = [1; 3;;
                                 1; 3;;
                                 3; 1]
         @test isapprox(expected_allDims_3b, reduce(hcat, getSubdivisionDims(Ms_3b,trackedInterval_3b,level_3b)))
 
-        trackedInterval_4 = TrackedInterval([1.;  1.])
+        trackedInterval_4 = TrackedInterval([1.;  1.;;])
         Ms_4 = [[ 1.98388230e-01; -7.45867440e-02;  4.04311356e-01;  5.88271449e-01;
                             2.26026393e-01;  1.32940050; -4.45466673e-01; -8.61593362e-01;
                             1.63812136e-01;  2.12669974e-01; -2.95468574e-02; -2.95366346e-02;
@@ -1346,7 +1324,7 @@ function test_getSubdivisionDims()
         expected_allDims_4 = [1;;]
         @test isapprox(expected_allDims_4, reduce(hcat, getSubdivisionDims(Ms_4,trackedInterval_4,level_4)))
 
-        trackedInterval_5 = TrackedInterval([-1.;         -0.48027223])
+        trackedInterval_5 = TrackedInterval([-1.;         -0.48027223;;])
         Ms_5 = [[ 6.69963798e-01;  2.18239042e-01; -1.22498853; -3.73956662e-02;
                             9.35209315e-02;  1.63685598e-03; -2.66713529e-03; -3.29041801e-05;
                             3.98745618e-05;  3.80448135e-07; -3.67357962e-07; -2.85931225e-09;
@@ -1361,7 +1339,7 @@ function test_getSubdivisionDims()
                                                         -1.;         1.;;
                                                         -1.;         1.;;
                                                         -0.2184735;  1.])
-        Ms_6 = [reshape(collect(0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
+        Ms_6 = [reshape(collect(0.0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
         level_6 = 1
         expected_allDims_6 = [3; 2; 1; 5; 4;;
                                         5; 4; 3; 2; 1;;
@@ -1375,7 +1353,7 @@ function test_getSubdivisionDims()
                                                 0.03945555;  1.;;
                                                 0.03945555;  0.8650092;;
                                                 0.41480102;  1.])
-        Ms_7 = [reshape(collect(0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
+        Ms_7 = [reshape(collect(0.0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
         level_7 = 2
         expected_allDims_7 = [3; 2; 1; 5; 4;;
                                         5; 4; 3; 2; 1;;
@@ -1389,7 +1367,7 @@ function test_getSubdivisionDims()
                                  0.03945555;  1.        ;;
                                  0.03945555;  0.8650092 ;;
                                  0.41480102;  1.        ])
-        Ms_8 = [reshape(collect(0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
+        Ms_8 = [reshape(collect(0.0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
         level_8 = 6
         expected_allDims_8 = [3; 2; 1; 5; 4;;
                                         5; 4; 3; 2; 1;;
@@ -1398,7 +1376,7 @@ function test_getSubdivisionDims()
                                         5; 3; 2; 1; 4]
         @test isapprox(expected_allDims_8, reduce(hcat, getSubdivisionDims(Ms_8,trackedInterval_8,level_8)))
 
-        trackedInterval_9 = TrackedInterval([-1.;  1.])
+        trackedInterval_9 = TrackedInterval([-1.;  1.;;])
         Ms_9 = [[ 1.98388230e-01; -7.45867440e-02;  4.04311356e-01;  5.88271449e-01;
                             2.26026393e-01;  1.32940050e+00; -4.45466673e-01; -8.61593362e-01;
                             1.63812136e-01;  2.12669974e-01; -2.95468574e-02; -2.95366346e-02;
@@ -1411,7 +1389,7 @@ function test_getSubdivisionDims()
         expected_allDims_9 = [1;;]
         @test isapprox(expected_allDims_9, reduce(hcat, getSubdivisionDims(Ms_9,trackedInterval_9,level_9)))
 
-        trackedInterval_10 = TrackedInterval([-1.;  1.])
+        trackedInterval_10 = TrackedInterval([-1.;  1.;;])
         Ms_10 = [[ 1.98388230e-01; -7.45867440e-02;  4.04311356e-01;  5.88271449e-01;
                             2.26026393e-01;  1.32940050e+00; -4.45466673e-01; -8.61593362e-01;
                             1.63812136e-01;  2.12669974e-01; -2.95468574e-02; -2.95366346e-02;
@@ -1429,7 +1407,7 @@ function test_getSubdivisionDims()
                                                 1.;  1. + 1e-5;;
                                                 0.03945555;  0.03945555 + 1e-5;;
                                                 0.41480102;  0.41480102 + 1e-5])
-        Ms_11 = [reshape(collect(0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
+        Ms_11 = [reshape(collect(0.0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
         level_11 = 2
         expected_allDims_11 = [2;;
                                 2;;
@@ -1443,7 +1421,7 @@ function test_getSubdivisionDims()
                                                 1.;  1. + 1e-5;;
                                                 0.03945555;  0.03945555 + 1e-5 ;;
                                                 0.41480102;  0.41480102 + 1e-5])
-        Ms_12 = [reshape(collect(0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
+        Ms_12 = [reshape(collect(0.0:3*3*3*2*2-1),(2,2, 3, 3,3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*3-1),(3, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*3*2-1),(2, 3, 3, 3, 3)),reshape(collect(0.0:3*3*3*2*3-1),(3, 2, 3, 3, 3))]
         level_12 = 2
         expected_allDims_12 = [1; 5; 4;;
                                 5; 4; 1;;
@@ -1456,7 +1434,7 @@ function test_getSubdivisionDims()
                                                 1;10;;
                                                 1;1 + 1e-5;;
                                                 1;13])
-        Ms_13 = [reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2))]
+        Ms_13 = [reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2))]
         level_13 = 4
         expected_allDims_13 = [2;;
                                 2;;
@@ -1468,7 +1446,7 @@ function test_getSubdivisionDims()
                                                 1;10;;
                                                 1;1 + 1e-5;;
                                                 1;13])
-        Ms_14 = [reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2))]
+        Ms_14 = [reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2))]
         level_14 = 4
         expected_allDims_14 = [2; 1;;
                                 2; 1;;
@@ -1480,7 +1458,7 @@ function test_getSubdivisionDims()
                                                 1;10;;
                                                 1;1 + 1e-5;;
                                                 1;13])
-        Ms_15 = [reshape(collect(0:15*3*2*1-1),(1,3,2,15)),reshape(collect(0:15*1*4*3-1),(3,4,1,15)),reshape(collect(0:15*3*2*1-1),(1,2,3,15)),reshape(collect(0:15*2*2*1-1),(1,2,2,15))]
+        Ms_15 = [reshape(collect(0.0:15*3*2*1-1),(1,3,2,15)),reshape(collect(0.0:15*1*4*3-1),(3,4,1,15)),reshape(collect(0.0:15*3*2*1-1),(1,2,3,15)),reshape(collect(0.0:15*2*2*1-1),(1,2,2,15))]
         level_15 = 4
         expected_allDims_15 = [1;;
                                 1;;
@@ -1491,8 +1469,6 @@ function test_getSubdivisionDims()
 end
 
 function test_getInverseOrder()
-    global type = Float64
-    global precision = 53
     @testset "getInverseOrder unit tests" begin
         @test (1, 3, 2, 4, 5, 7, 6, 8) == getInverseOrder([2; 4; 3])
         @test getInverseOrder([2; 1; 3]) == (1, 2, 5, 6, 3, 4, 7, 8)
@@ -1515,8 +1491,6 @@ function test_getInverseOrder()
 end
 
 function test_getSubdivisionIntervals()
-    global type = Float64
-    global precision = 53
     @testset "getSubdivision Intervals unit tests" begin
         trackedInterval_1 = TrackedInterval([-0.63673497;  0.75388677;;
                                                         -1.;          0.24771388;;
@@ -3259,7 +3233,7 @@ function test_getSubdivisionIntervals()
         @test all(isapprox(interval.interval,exp) for (interval,exp) in zip(allIntervals_4,expected_allIntervals_4))
         @test all(isapprox(transforms,exp) for (transforms,exp) in zip(allTransforms_4,expected_transforms_4))
 
-        trackedInterval_5 = TrackedInterval([-1.;         -0.48027223])
+        trackedInterval_5 = TrackedInterval([-1.;         -0.48027223;;])
         Ms_5 = [[ 6.69963798e-01;  2.18239042e-01; -1.22498853e+00; -3.73956662e-02;
                             9.35209315e-02;  1.63685598e-03; -2.66713529e-03; -3.29041801e-05;
                             3.98745618e-05;  3.80448135e-07; -3.67357962e-07; -2.85931225e-09;
@@ -3282,7 +3256,7 @@ function test_getSubdivisionIntervals()
         @test all(isapprox(interval.interval,exp) for (interval,exp) in zip(allIntervals_5,expected_allIntervals_5))
         @test all(isapprox(transforms,exp) for (transforms,exp) in zip(allTransforms_5,expected_transforms_5))
 
-        trackedInterval_6 = TrackedInterval([-1.;         -0.48027223])
+        trackedInterval_6 = TrackedInterval([-1.;         -0.48027223;;])
         Ms_6 = [[ 6.69963798e-01;  2.18239042e-01; -1.22498853e+00; -3.73956662e-02;
                             9.35209315e-02;  1.63685598e-03; -2.66713529e-03; -3.29041801e-05;
                             3.98745618e-05;  3.80448135e-07; -3.67357962e-07; -2.85931225e-09;
@@ -4169,7 +4143,7 @@ function test_getSubdivisionIntervals()
         @test all(isapprox(interval.interval,exp) for (interval,exp) in zip(allIntervals_11,expected_allIntervals_11))
         @test all(isapprox(transforms,exp) for (transforms,exp) in zip(allTransforms_11,expected_transforms_11))
 
-        trackedInterval_12 = TrackedInterval([1.;  1. + 1e-5])
+        trackedInterval_12 = TrackedInterval([1.;  1. + 1e-5;;])
         Ms_12 = [[ 1.98388230e-01; -7.45867440e-02;  4.04311356e-01;  5.88271449e-01;
                             2.26026393e-01;  1.32940050e+00; -4.45466673e-01; -8.61593362e-01;
                             1.63812136e-01;  2.12669974e-01; -2.95468574e-02; -2.95366346e-02;
@@ -5865,7 +5839,7 @@ function test_getSubdivisionIntervals()
                                                           1;10;;
                                                           1;1 + 1e-5;;
                                                           1;13])
-        Ms_16 = [reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2))]
+        Ms_16 = [reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2))]
         level_16 = 4
         errors_16 = [.00000034523452345,.000000000000035634,.0000000034563456,.00000002112341243]
         expected_allMs_first_16 = [-2.03478532688930568995, -2.03478532688930568995, -2.03478532688930568995, -2.03478532688930568995, 0.12303686350311315856, 0.12303686350311315856, 0.12303686350311315856, 0.12303686350311315856]
@@ -5888,7 +5862,7 @@ function test_getSubdivisionIntervals()
                                                           1;10;;
                                                           1;1 + 1e-5;;
                                                           1;13])
-        Ms_17 = [reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0:2*3*2*1-1),(1,2,3,2))]
+        Ms_17 = [reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2)),reshape(collect(0.0:2*3*2*1-1),(1,2,3,2))]
         level_17 = 4
         errors_17 = [.00000034523452345,.000000000000035634,.0000000034563456,.00000002112341243]
         expected_allMs_first_17 = [-1.78130725334957440431, -1.78130725334957440431, -1.78130725334957440431, -1.78130725334957440431, -3.65515690937392889737, -3.65515690937392889737, -3.65515690937392889737, -3.65515690937392889737, -2.30908724917568131119, -2.30908724917568131119, -2.30908724917568131119, -2.30908724917568131119, 4.21161857078101142804, 4.21161857078101142804, 4.21161857078101142804, 4.21161857078101142804]
@@ -5911,7 +5885,7 @@ function test_getSubdivisionIntervals()
                                                           1;10;;
                                                           1;1 + 1e-5;;
                                                           1;13])
-        Ms_18 = [reshape(collect(0:15*3*2*1-1),(1,3,2,15)),reshape(collect(0:15*1*4*3-1),(3,4,1,15)),reshape(collect(0:15*3*2*1-1),(1,2,3,15)),reshape(collect(0:15*2*2*1-1),(1,2,2,15))]
+        Ms_18 = [reshape(collect(0.0:15*3*2*1-1),(1,3,2,15)),reshape(collect(0.0:15*1*4*3-1),(3,4,1,15)),reshape(collect(0.0:15*3*2*1-1),(1,2,3,15)),reshape(collect(0.0:15*2*2*1-1),(1,2,2,15))]
         level_18 = 4
         errors_18 = [.00000034523452345,.000000000000035634,.0000000034563456,.00000002112341243]
         expected_allMs_first_18 = [-10.01235914199165932814, -20.02471828398331865628, -10.01235914199165932814, -6.67490609466110651482, 5.13004204674147068488, 10.26008409348294136976, 5.13004204674147068488, 3.42002803116097897629]
@@ -5933,8 +5907,6 @@ function test_getSubdivisionIntervals()
 end                                                                                    
 
 function test_zoomInOnIntervalIter()
-    global type = Float64
-    global precision = 53
     @testset "zoomInOnIntervalIter unit tests" begin
         Ms_1 = [[ 1.07142165e+00;  1.61772562e-01;;
                         5.75461946e-02;  5.61619043e-01;;;
@@ -7284,8 +7256,6 @@ function test_zoomInOnIntervalIter()
 end
 
 function test_boundingIntervalLinearSystem()
-    global type = Float64
-    global precision = 53
     @testset "BoundingIntervalLinearSystem unit tests" begin
         Ms_1 = [[ 1.07142165e+00;  1.61772562e-01;;
                         5.75461946e-02;  5.61619043e-01;;;
@@ -9321,8 +9291,6 @@ function test_boundingIntervalLinearSystem()
 end
 
 function test_isExteriorInterval()
-    global type = Float64
-    global precision = 53
     @testset "isExteriorInterval unit tests" begin
         trackedInterval_1 = TrackedInterval([-.31111222222;-.3;;3;4;;3;4])
         trackedInterval_2 = TrackedInterval([-.31111222222;-.2;;4;5;;4;5])
@@ -9334,8 +9302,6 @@ function test_isExteriorInterval()
 end
 
 function test_trimMs_keepsATinyPolynomial()
-    global type = Float64
-    global precision = 53
     @testset "trimMs does not trim a polynomial below order 1" begin
         # Regression test: the default absolute allowance was 2^-(precision-1), which every
         # coefficient row of a polynomial scaled to 1e-20 fits under, so this was trimmed to the
@@ -9349,8 +9315,6 @@ function test_trimMs_keepsATinyPolynomial()
 end
 
 function test_trimMs()
-    global type = Float64
-    global precision = 53
     @testset "trim_Ms unit tests" begin
         # doesn't trim
         Ms_1 = [[-1.19628962e-01;  4.78500000e+00;  1.36125000e+00;;       
@@ -10989,8 +10953,6 @@ function test_trimMs()
 end
 
 function test_solvePolyRecursive()
-    global type = Float64
-    global precision = 53
     @testset "solvePolyRecursive unit tests" begin
         Ms_1 = [[0.;0;0;1;;0;0;0;0;;1;0;0;0],[0.;1;1;;-1;0;0]]
         tInterval_1 = TrackedInterval([-1.;1;;-1;1])
@@ -11631,8 +11593,6 @@ function test_solvePolyRecursive()
 end
 
 function test_solveChebyshevSubdivision()
-    global type = Float64
-    global precision = 53
     @testset "solveChebyshevSubdivision unit tests" begin
         Ms_1 = [[0.;0;0;1;;0;0;0;0;;1;0;0;0],[0.;1;1;;-1;0;0]]
         errs_1 = [0.,0]

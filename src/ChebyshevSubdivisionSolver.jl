@@ -14,7 +14,7 @@ end
 # TODO: import from a library instead
 """Returns x,y such that a = x+y exactly and a = x in floating point."""
 function homebrewSplit(a)
-    c = (type(2)^ceil(Int,precision/2) + 1) * a
+    c = splitter(eltype(a)) * a
     x = c-(c-a)
     y = a-x
     return x,y
@@ -31,9 +31,31 @@ function twoProd(a,b)
 end
 
 # Scalar forms of the three routines above. The array versions broadcast, which allocates half a
-# dozen temporaries per call; the transform replay in TrackedInterval calls them once per saved
-# transform per root, so the temporaries dominated there. Element for element these compute
+# dozen temporaries per call; the transform replay in TrackedInterval calls them once per
+# saved transform per root, so the temporaries dominated there. Element for element these compute
 # exactly the same floating point operations as the broadcasts.
+"""Dekker's splitting constant 2^ceil(p/2) + 1 for a type with p significand bits (2^27 + 1 for Float64)."""
+@inline splitter(::Type{T}) where {T<:AbstractFloat} = T(2)^cld(precision(T), 2) + 1
+
+@inline function splitScalar(a::T) where {T<:AbstractFloat}
+    c = splitter(T) * a
+    x = c - (c - a)
+    return x, a - x
+end
+
+@inline function twoSumScalar(a::T, b::T) where {T<:AbstractFloat}
+    x = a + b
+    z = x - a
+    return x, (a - (x - z)) + (b - z)
+end
+
+@inline function twoProdScalar(a::T, b::T) where {T<:AbstractFloat}
+    x = a * b
+    a1, a2 = splitScalar(a)
+    b1, b2 = splitScalar(b)
+    return x, a2 * b2 - (((x - a1 * b1) - a2 * b1) - a1 * b2)
+end
+
 # TODO: import from a library instead
 """Returns x,y such that a*b = x+y exactly and a*b = x in floating point but with a already split."""
 function TwoProdWithSplit(a,b,a1,a2)
@@ -42,6 +64,10 @@ function TwoProdWithSplit(a,b,a1,a2)
     y=a2*b2-(((x-a1*b1)-a2*b1)-a1*b2)
     return x,y
 end 
+
+"""`x` converted to element type T, or `x` itself when it already has that type (so nothing is copied)."""
+asType(::Type{T}, x::AbstractArray{T}) where {T} = x
+asType(::Type{T}, x::AbstractArray) where {T} = T.(x)
 
 """Gets the linear terms of the Chebyshev coefficient tensor M.
 
@@ -68,14 +94,30 @@ function getLinearTerms(M)
     # Index the tensor directly rather than building an untyped list: `A = []` gave a Vector{Any},
     # which forced every caller to convert, and boxed each coefficient on the way in.
     N = ndims(M)
-    T = eltype(M)
-    A = Vector{T}(undef, N)
+    A = Vector{eltype(M)}(undef, N)
     spot = 1
     @inbounds for d in 1:N
         s = size(M, d)
         # Fill from the back so the result is already in dimension order (the old code reversed).
-        A[N - d + 1] = s == 1 ? zero(T) : M[spot + 1]
+        A[N - d + 1] = s == 1 ? zero(eltype(M)) : M[spot + 1]
         spot *= s
+    end
+    return A
+end
+
+"""Writes the linear terms of each M in `Ms` into the columns of `A`, which must be dim x dim.
+
+The same work as calling `getLinearTerms` once per polynomial and hcat-ing the results, but
+without the intermediate vectors."""
+function fillLinearTerms!(A::Matrix, Ms)
+    N = size(A, 1)
+    @inbounds for (j, M) in enumerate(Ms)
+        spot = 1
+        for d in 1:N
+            s = size(M, d)
+            A[N - d + 1, j] = s == 1 ? zero(eltype(A)) : M[spot + 1]
+            spot *= s
+        end
     end
     return A
 end
@@ -102,12 +144,13 @@ b : array
     
 """
 function linearCheck1(totalErrs,A,consts)
-    dim = length(A[1,:])
-    a = -type.(ones(dim) * Inf)
-    b = type.(ones(dim) * Inf)
-    for row in 1:dim
+    dim = size(A, 2)
+    T = eltype(A)
+    a = fill(T(-Inf), dim)
+    b = fill(T(Inf), dim)
+    @inbounds for row in 1:dim
         for col in 1:dim
-            if abs(A[col,row]) > type(2)^-(precision-1) #Don't bother running the check if the linear term is too small.
+            if abs(A[col,row]) > eps(T) #Don't bother running the check if the linear term is too small.
                 v1 = totalErrs[row] / abs(A[col,row]) - 1
                 v2 = 2 * consts[row] / A[col,row]
                 if v2 >= 0
@@ -153,7 +196,7 @@ function reduceSolvedDim(Ms, errors, trackedInterval, dim)
         # Get the dimensions of each M
         degs = reverse(size(M))
         total_dim = length(degs)
-        x = zeros(degs[dim+1])
+        x = zeros(eltype(M), degs[dim+1])
         x[1:2:end] = [(-1)^i for i in collect(0:(degs[dim+1]+1)//2-1)]
         new_M = reshape(mapslices(v->sum(x.*v),M,dims=total_dim-dim),reverse(degs[1:end .!= dim+1]))
         push!(final_Ms,new_M)
@@ -173,13 +216,15 @@ end
 Does the 1d coeff array case for transformChebInPlace1D
 """
 function transformChebInPlace1D1D(coeffs,alpha,beta)
+    T = eltype(coeffs)
+    alpha, beta = T(alpha), T(beta)
     coeffs_shape = size(coeffs)
     last_dim_length = coeffs_shape[end]
-    transformedCoeffs = zeros(type,coeffs_shape)
+    transformedCoeffs = zeros(T, coeffs_shape)
     # Initialize three arrays to represent subsequent columns of the transformation matrix.
-    arr1 = zeros(type,last_dim_length)
-    arr2 = zeros(type,last_dim_length)
-    arr3 = zeros(type,last_dim_length)
+    arr1 = zeros(T, last_dim_length)
+    arr2 = zeros(T, last_dim_length)
+    arr3 = zeros(T, last_dim_length)
 
     #The first column of the transformation matrix C. Since T_0(alpha*x + beta) = T_0(x) = 1 has 1 in the top entry and 0's elsewhere.
     arr1[1] = 1
@@ -216,7 +261,7 @@ function transformChebInPlace1D1D(coeffs,alpha,beta)
         finalVal = alpha*arr2[i]
         # This final entry is typically very small. If it is essentially machine epsilon,
         # zero it out to save calculations.
-        if abs(finalVal) > type(2)^-(precision-1) #TODO: Justify this val!
+        if abs(finalVal) > eps(T) #TODO: Justify this val!
             arr3[maxRow+1] = finalVal
             transformedCoeffs[maxRow+1] += thisCoeff * finalVal
             maxRow += 1 # Next column will have one more entry than the current column.
@@ -237,6 +282,10 @@ Recursively finds each column of the transformation matrix C from the previous t
 and then performs entrywise matrix multiplication for each entry of the column, thus enabling
 the transformation to occur while only retaining three columns of C in memory at a time.
 
+The contraction is accumulated in place into a preallocated output tensor, operating directly
+on the slices along dimension `workdim` (defaults to the last dimension). This avoids
+materializing the slices and the per-column temporary arrays.
+
 Parameters
 ----------
 coeffs : array
@@ -245,74 +294,79 @@ alpha : double
     The scaler of the transformation
 beta : double
     The shifting of the transformation
+workdim : int
+    The (Julia) dimension of coeffs to transform. Defaults to the last dimension.
 
 Returns
 -------
 transformedCoeffs : array
     The new coefficient array following the transformation
 """
-function transformChebInPlace1D(coeffs,alpha,beta)
-    coeffs_shape = size(coeffs)
-    if length(coeffs_shape) == 1
+function transformChebInPlace1D(coeffs,alpha,beta,workdim=ndims(coeffs))
+    N = ndims(coeffs)
+    if N == 1
         return transformChebInPlace1D1D(coeffs,alpha,beta)
     end
-    last_dim_length = coeffs_shape[end]
-    transformedCoeffs = zeros(type, coeffs_shape)
+    T = eltype(coeffs)
+    alpha, beta = T(alpha), T(beta)
+    last_dim_length = size(coeffs, workdim)
+    # Collapse the dimensions before/after workdim so coeffs is viewed as a fixed 3D array
+    # (before, workdim, after). This is type stable for any N and any target axis, and reshape
+    # shares memory (no copy), so the contraction accumulates in place with no permutedims.
+    before = 1
+    for k in 1:workdim-1
+        before *= size(coeffs, k)
+    end
+    after = 1
+    for k in workdim+1:N
+        after *= size(coeffs, k)
+    end
+    in3 = reshape(coeffs, before, last_dim_length, after)
+    out3 = zeros(T, before, last_dim_length, after)
     # Initialize three arrays to represent subsequent columns of the transformation matrix.
-    arr1 = zeros(type, last_dim_length)
-    arr2 = zeros(type, last_dim_length)
-    arr3 = zeros(type, last_dim_length)
+    arr1 = zeros(T, last_dim_length)
+    arr2 = zeros(T, last_dim_length)
+    arr3 = zeros(T, last_dim_length)
 
     #The first column of the transformation matrix C. Since T_0(alpha*x + beta) = T_0(x) = 1 has 1 in the top entry and 0's elsewhere.
     arr1[1] = 1
 
-    # Get the correct number of colons for indexing transformedCoeffs
-    # idxs = []
-    dims = length(coeffs_shape)
-    # for i in 1:dims-1
-    #     push!(idxs,:)
-    # end
-
-    # oldSlices = mapslices(x->[x],coeffs,dims = 1:dims-1)
-    oldSlices = collect(eachslice(coeffs,dims=dims))
-    # newSlices = mapslices(x->[x],transformedCoeffs,dims = 1:dims-1)
-    newSlices = collect(Array.(eachslice(transformedCoeffs,dims=dims)))
-    newSlices[1] = oldSlices[1] # arr1[0] * coeffs[0] (matrix multiplication step)
+    # The workdim slices are accumulated into directly (no per-column temporary arrays).
+    @views out3[:,1,:] .= in3[:,1,:] # arr1[0] * coeffs[0]
     #The second column of C. Note that T_1(alpha*x + beta) = alpha*T_1(x) + beta*T_0(x).
     arr2[1] = beta
     arr2[2] = alpha
-    newSlices[1] += beta * oldSlices[2] # arr2[0] * coeffs[1] (matrix muliplication)
-    newSlices[2] += alpha * oldSlices[2] # arr2[1] * coeffs[1] (matrix multiplication)
+    @views out3[:,1,:] .+= beta .* in3[:,2,:] # arr2[0] * coeffs[1]
+    @views out3[:,2,:] .+= alpha .* in3[:,2,:] # arr2[1] * coeffs[1]
     maxRow = 2
     for col in 2:last_dim_length-1 # For each column, calculate each entry and do matrix mult
-        thisCoeff = oldSlices[col+1] # the row of coeffs corresponding to the column col of C (for matrix mult)
+        thisCoeff = @view in3[:,col+1,:] # the row of coeffs corresponding to column col of C
         # The first entry
         arr3[1] = -arr1[1] + alpha*arr2[2] + 2*beta*arr2[1]
-        newSlices[1] += thisCoeff * arr3[1]
+        @views out3[:,1,:] .+= arr3[1] .* thisCoeff
         # The second entry
         if maxRow > 2
             arr3[2] = -arr1[2] + alpha*(2*arr2[1] + arr2[3]) + 2*beta*arr2[2]
-            newSlices[2] += thisCoeff * arr3[2]
+            @views out3[:,2,:] .+= arr3[2] .* thisCoeff
         end
 
         # All middle entries
         for i in 3:maxRow-1
             arr3[i] = -arr1[i] + alpha*(arr2[i-1] + arr2[i+1]) + 2*beta*arr2[i]
-            # newSlices[i] += thisCoeff .* arr3[i]
-            newSlices[i] += thisCoeff * arr3[i]
+            @views out3[:,i,:] .+= arr3[i] .* thisCoeff
         end
 
         # The second to last entry
         i = maxRow
         arr3[i] = -arr1[i] + (i == 2 ? 2 : 1)*alpha*(arr2[i-1]) + 2*beta*arr2[i]
-        newSlices[i] += thisCoeff * arr3[i]
+        @views out3[:,i,:] .+= arr3[i] .* thisCoeff
         #The last entry
         finalVal = alpha*arr2[i]
         # This final entry is typically very small. If it is essentially machine epsilon,
         # zero it out to save calculations.
-        if abs(finalVal) > type(2)^(-(precision-1)) #TODO: Justify this val!
+        if abs(finalVal) > eps(T) #TODO: Justify this val!
             arr3[maxRow+1] = finalVal
-            newSlices[maxRow+1] += thisCoeff * finalVal
+            @views out3[:,maxRow+1,:] .+= finalVal .* thisCoeff
             maxRow += 1 # Next column will have one more entry than the current column.
         end
 
@@ -322,12 +376,15 @@ function transformChebInPlace1D(coeffs,alpha,beta)
         arr2 = arr3
         arr3 = arr
     end
-    # newSlices holds equally sized slices of transformedCoeffs taken along `dims`, so
-    # stacking them along a new trailing axis rebuilds the tensor. This was
-    # `convert(Array, VectorOfArray(...))`, the only use of RecursiveArrayTools in the
-    # package -- a dependency that pulls in SymbolicIndexingInterface and broke
-    # precompilation on Julia 1.12.
-    return stack(newSlices[1:maxRow])
+    # Reshape back to N dimensions, with the transformed axis trimmed to maxRow.
+    # Bind maxRow to a fresh local that is never reassigned so the closure below does not capture
+    # (and therefore box) the loop-mutated maxRow, which would deoptimize the hot loop above.
+    mr = maxRow
+    outshape = ntuple(k -> k == workdim ? mr : size(coeffs, k), Val(N))
+    # Nothing was trimmed, so out3 already holds exactly the result: reshape it (which shares
+    # memory) instead of copying a second full-size array out of it.
+    mr == last_dim_length && return reshape(out3, outshape)
+    return reshape(out3[:, 1:mr, :], outshape)
 end
 
 """Transforms a single dimension of a Chebyshev approximation for a polynomial.
@@ -352,27 +409,16 @@ transformedCoeffs : array
 """
 function TransformChebInPlaceND(coeffs, dim, alpha, beta, exact)
 
-    #TODO: Could we calculate the allowed error beforehand and pass it in here?
+        #TODO: Could we calculate the allowed error beforehand and pass it in here?
     #TODO: Make this work for the power basis polynomials
     if (((alpha == 1.0) && (beta == 0.0)) || (size(coeffs)[end-(dim-1)] == 1))
         return coeffs # No need to transform if the degree of dim is 0 or transformation is the identity.
     end
 
-    transformFunc = transformChebInPlace1D
-
-    if dim == 1
-        return transformFunc(coeffs, alpha, beta)
-    else # Need to transpose the matrix to line up the multiplication for the current dim
-        ndim = length(size(coeffs))
-        # Move the current dimension to the dim 0 spot in the np array.
-        python_order = vcat([dim], collect(1:dim-1), collect(dim+1:ndim))
-        order = (ndim+1) .- reverse(python_order)
-        # Then transpose with the inverted order after the transformation occurs.
-        python_backOrder = zeros(Int,ndim)
-        python_backOrder[python_order] = collect(1:length(size(coeffs)))
-        backOrder = (ndim+1) .- reverse(python_backOrder)
-        return permutedims(transformFunc(permutedims(coeffs,order), alpha, beta),backOrder)
-    end
+    # The numpy dimension `dim` corresponds to the Julia dimension nd-dim+1. Transform that axis
+    # directly instead of permuting it to the last position and back.
+    nd = ndims(coeffs)
+    return transformChebInPlace1D(coeffs, alpha, beta, nd - dim + 1)
 end
 
 """Returns an upper bound on the error of transforming the Chebyshev approximation M
@@ -395,7 +441,7 @@ error : float
 """
 function getTransformationError(M,dim)
 
-    machEps = type(2)^-(precision-1)
+    machEps = eps(eltype(M))
     error = size(M, ndims(M) - dim + 1) * machEps * sum(abs, M)
     return error #TODO: Figure out a more rigurous bound!
 end
@@ -456,8 +502,8 @@ newErrors : array
 """
 function transformChebToInterval(Ms, alphas, betas, errors, exact)
     #Transform the chebyshev polynomials
-    newMs = []
-    newErrors = []
+    newMs = Vector{eltype(Ms)}()
+    newErrors = Vector{eltype(errors)}()
     for (M,e) in zip(Ms, errors)
         newM, newE = transformCheb(M, alphas, betas, e, exact)
         push!(newMs,newM)
@@ -477,6 +523,16 @@ function findVertices(A,b,errors)
     as = minimum(verts,dims=2)
     return as,bs
 end
+
+"""
+The type the linear bounding step runs in for a solve in type T: T itself, except Float32 for Float16.
+
+That step scales each row and column of a dim x dim matrix by a power of two to bring its entries to
+about 1, and the factor for a column of entries near 1e-7 is 2^24, past Float16's largest value of 65504.
+It overflowed to Inf, the matrix filled with NaN, and LAPACK rejected it. LAPACK has no Float16 SVD
+anyway, so the decomposition was already done in Float32.
+"""
+linearSystemType(::Type{T}) where {T} = T === Float16 ? Float32 : T
 
 """Finds a smaller region in which any root must be.
 
@@ -501,49 +557,69 @@ throwout :
     Whether we should throw out the interval entirely
 """
 function boundingIntervalLinearSystem(Ms, errors, finalStep)
+    T = linearSystemType(eltype(Ms[1]))
     if finalStep
-        errors = zeros(type, size(errors))
+        errors = zeros(T, size(errors))
     end
-    s=1
+    s = one(T)
     dim = length(Ms)
     #Some constants we use here
-    minZoomForChange = type(0.99) #If the volume doesn't shrink by this amount say that it hasn't changed
-    minZoomForBaseCaseEnd = type(0.4)^dim #If the volume doesn't change by at least this amount when running with no error, stop
+    minZoomForChange = 0.99 #If the volume doesn't shrink by this amount say that it hasn't changed
+    minZoomForBaseCaseEnd = 0.4^dim #If the volume doesn't change by at least this amount when running with no error, stop
     #Get the matrix of the linear terms
-    A = Matrix{type}(reduce(hcat,[getLinearTerms(M) for M in Ms]))
+    A = Matrix{T}(undef, dim, dim)
+    fillLinearTerms!(A, Ms)
     #Get the Vector of the constant terms
-    consts = [M[1] for M in Ms]'
+    consts = Vector{T}(undef, dim)
     #Get the Error of everything else combined.
-    # sum(abs, M) rather than sum(abs.(M)): the latter materialized a full copy of every
-    # coefficient tensor on every interval.
-    totalErrs = [sum(abs, Ms[i]) + errors[i] for i = 1:dim]'
-    linear_sums = sum(abs.(A),dims=1)
-    err = totalErrs - abs.(consts) - linear_sums
+    totalErrs = Vector{T}(undef, dim)
+    @inbounds for i in 1:dim
+        consts[i] = Ms[i][1]
+        # sum(abs, M) rather than sum(abs.(M)): the latter materialized a full copy of every
+        # coefficient tensor on every interval, which dominated this function.
+        totalErrs[i] = (T === eltype(Ms[i]) ? sum(abs, Ms[i]) : sum(x -> abs(T(x)), Ms[i])) + errors[i]
+    end
+    err = Vector{T}(undef, dim)
+    @inbounds for i in 1:dim
+        linear_sum = zero(T)
+        for r in 1:dim
+            linear_sum += abs(A[r, i])
+        end
+        err[i] = totalErrs[i] - abs(consts[i]) - linear_sum
+    end
 
     #Scale all the polynomials relative to one another
-    errors = Base.copy(errors')
-    errors_0 = Base.copy(errors)
-    for i in 1:dim
-        scaleVal = maximum(abs.(A[:,i]))
+    errors = T === eltype(errors) ? Base.copy(errors) : T.(errors)
+    @inbounds for i in 1:dim
+        scaleVal = zero(T)
+        for r in 1:dim
+            scaleVal = max(scaleVal, abs(A[r, i]))
+        end
         if scaleVal > 0
-            s = type(2) ^Int(floor(log2(abs(scaleVal))))
-            A[:,i] /= s
+            s = T(2)^Int(floor(log2(abs(scaleVal))))
+            for r in 1:dim
+                A[r, i] /= s
+            end
             consts[i] /= s
             totalErrs[i] /= s
-            linear_sums[i] /= s
             err[i] /= s
             errors[i] /= s
         end
     end
     #Precondition the columns. (AP)X = B -> A(PX) = B. So scale columns, solve, then scale the solution.
-    colScaler = ones(type, dim)
-    for i in 1:dim
-        scaleVal = maximum(abs.(A[i,:]))
+    colScaler = ones(T, dim)
+    @inbounds for i in 1:dim
+        scaleVal = zero(T)
+        for c in 1:dim
+            scaleVal = max(scaleVal, abs(A[i, c]))
+        end
         if scaleVal > 0
-            s = type(2)^(-floor(log2(abs(scaleVal))))
+            s = T(2)^(-floor(log2(abs(scaleVal))))
             colScaler[i] = s
-            totalErrs += abs.(A[i,:])' * (s - 1)
-            A[i,:] *= s
+            for c in 1:dim
+                totalErrs[c] += abs(A[i, c]) * (s - 1)
+                A[i, c] *= s
+            end
         end
     end
 
@@ -553,14 +629,23 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
     a0, b0 = linearCheck1(totalErrs, A, consts)
     a_orig = a0
     b_orig = b0
-    U,S,Vh = svd(A')
-    Ainv = ((type(1) ./ S).*Vh')' * (U')
-    center = -Ainv*consts'
+    F = svd(A')
+    # LAPACK has no Float16 SVD: LinearAlgebra computes it in Float32 and returns Float32 factors.
+    # Bring them back to T, so everything after this stays in the solve's type. For Float64 (and
+    # BigFloat, via GenericLinearAlgebra) the factors are already in T and nothing is copied.
+    S = asType(T, F.S)
+    # Ainv = V * diag(1/S) * U'. Built directly instead of through a chain of adjoints and
+    # broadcasts, each of which allocated a dim x dim temporary.
+    # Kept as the original chain of matrix products: on dim x dim with dim <= 4 this is not hot,
+    # and hand-rolling the sums changes the last bit of the result relative to BLAS.
+    Ainv = ((one(T) ./ S) .* asType(T, F.V)')' * (asType(T, F.U)')
+    center = -Ainv * consts
+    absAinv = abs.(Ainv)
     # Test the reciprocal condition number rather than the condition number itself, so that
     # a singular A gives 0 instead of a divide by zero. S[1] == 0 means A is all zeros.
-    invCondNum = S[1] > 0 ? S[end]/S[1] : type(0)
+    invCondNum = S[1] > 0 ? S[end]/S[1] : zero(T)
     wellConditioned = S[1] > 0 && invCondNum > 1e-10
-    machEps = type(2)^-(precision-1)
+    machEps = eps(T)
     # Add this width to the new intervals we find to avoid rounding error throwing out roots.
     # Solving with Ainv below loses about condNum digits, so the interval it produces has to be
     # padded by that much. The bound from linearCheck1 is computed entrywise and only loses a
@@ -570,38 +655,47 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
     # number, never greater than 1, so the max was always exactly 2 and the padding never grew
     # past machine epsilon however stiff the system was. Roots were discarded outright:
     # x + y = 0.3 against x + (1+eps) y = 0.3 returned nothing for eps of 1e-4, 1e-6 and 1e-7.
-    condNum = wellConditioned ? type(1)/invCondNum : type(1)
+    condNum = wellConditioned ? one(T)/invCondNum : one(T)
     widthToAdd = max(condNum,2)*machEps
     for i = 0:1
         #Now do the linear solve check
         #We use the matrix inverse to find the width, so might as well use it both spots. Should be fine as dim is small.
         if wellConditioned #Make sure conditioning is ok.
-            width = abs.(Ainv)*err'
-            a1 = center-width
-            b1 = center + width
-            # Elementwise max/min of two columns; mapslices over an hcat allocated the stacked
-            # matrix, a view per row and a wrapper per result.
-            a = max.(a0, a1)
-            b = min.(b0, b1)
+            # `err` is reshaped to a column on purpose. The original built it by broadcasting
+            # against `sum(abs.(A), dims=1)`, so it was a 1 x dim matrix and `err'` made this a
+            # matrix-matrix product. Passing a plain vector makes it a matrix-vector product
+            # instead, and BLAS's two kernels do not agree to the last bit -- enough to move a
+            # root, since these bounds steer the search.
+            width = absAinv * reshape(err, :, 1)
+            a = max.(a0, center .- width)
+            b = min.(b0, center .+ width)
         else
+            # Deliberately aliases a0/b0, as before: the in-place scaling below is meant to carry
+            # over to the second pass through this loop.
             a = a0
             b = b0
         end
-        #Undo the column preconditioning
-        a .*= colScaler
-        b .*= colScaler
-        #Add error and bound
-        a .-= widthToAdd
-        b .+= widthToAdd
-        throwOut = any(a .> b) || any(a .> 1) || any(b .< -1)
-        a[a .< -1] .= -1
-        b[b .< -1] .= -1
-        a[a .> 1] .= 1
-        b[b .> 1] .= 1
+        # Undo the column preconditioning, add the error, bound to [-1,1] and take the volume
+        # ratio -- all in one pass, instead of a dozen broadcasts each allocating a temporary
+        # (the comparisons alone allocated four BitArrays per iteration).
+        throwOut = false
+        volume = one(T)
+        @inbounds for d in 1:dim
+            ad = a[d] * colScaler[d] - widthToAdd
+            bd = b[d] * colScaler[d] + widthToAdd
+            throwOut |= (ad > bd) | (ad > 1) | (bd < -1)
+            ad < -1 && (ad = -one(T))
+            bd < -1 && (bd = -one(T))
+            ad > 1 && (ad = one(T))
+            bd > 1 && (bd = one(T))
+            a[d] = ad
+            b[d] = bd
+            volume *= bd - ad
+        end
 
         forceShouldStop = finalStep && !wellConditioned
         # Calculate the "changed" variable
-        newRatio = prod(b - a) ./ type(2)^dim
+        newRatio = volume / T(2)^dim
         changed = false
         if throwOut
             changed = true
@@ -670,8 +764,8 @@ function zoomInOnIntervalIter(Ms, errors, trackedInterval, exact)
     #Don't zoom in if we're already at a point
     for curr_dim in 1:dim
         if trackedInterval.interval[1,curr_dim] == trackedInterval.interval[2,curr_dim]
-            interval[1,curr_dim] = type(-1)
-            interval[2,curr_dim] = type(1)
+            interval[1,curr_dim] = -1.0
+            interval[2,curr_dim] = 1.0
         end
     end
     #We can't throw out on the final step
@@ -691,7 +785,8 @@ function zoomInOnIntervalIter(Ms, errors, trackedInterval, exact)
     end
     #Transform the chebyshev polynomials
     addTransform(trackedInterval,interval)
-    Ms, errors = transformChebToInterval(Ms, getLastTransform(trackedInterval)[:,1],getLastTransform(trackedInterval)[:,2], errors, exact)
+    lastTransform = getLastTransform(trackedInterval)
+    Ms, errors = transformChebToInterval(Ms, lastTransform[:,1], lastTransform[:,2], errors, exact)
     #We should stop in the final step once the interval has become a point
     if trackedInterval.finalStep && isPoint(trackedInterval)
         should_stop = true
@@ -840,20 +935,22 @@ function getSubdivisionIntervals(Ms,errors,trackedInterval,exact,level;oneDimens
         subdivisionDims = getSubdivisionDims(Ms,trackedInterval,level)
     end
     dimSet = sort(subdivisionDims[1])
-    allMs = []
-    allErrors = []
+    AT = eltype(Ms) # Concrete polynomial array type (e.g. Array{Float64,N}); keep containers typed.
+    ET = eltype(eltype(Ms)) # The number type of the solve
+    allMs = Vector{Vector{AT}}()
+    allErrors = Vector{Vector{ET}}()
     idx = 0
     dim = length(Ms)
     for (M,error,order_num) in zip(Ms, errors, collect(1:dim))
         order = subdivisionDims[order_num]
         idx += 1
         #Iterate through the dimensions, highest degree first.
-        currMs, currErrs = [M],[error]
+        currMs, currErrs = AT[M], ET[error]
         for thisDim in order
             newMidpoint = trackedInterval.nextTransformPoints[thisDim]
             alpha, beta = (newMidpoint+1)/2, (newMidpoint-1)/2
-            tempMs = []
-            tempErrs = []
+            tempMs = AT[]
+            tempErrs = ET[]
             for (T,E) in zip(currMs, currErrs)
                 #Transform the polys
                 P1, P2 = TransformChebInPlaceND(T, thisDim, alpha, beta, thisDim), TransformChebInPlaceND(T, thisDim, -beta, alpha, exact)
@@ -872,20 +969,20 @@ function getSubdivisionIntervals(Ms,errors,trackedInterval,exact,level;oneDimens
         else
             #Order the polynomials so they match the intervals in subdivideInterval
             invOrder = getInverseOrder(order)
-            push!(allMs,[currMs[i] for i in invOrder])
-            push!(allErrors,([currErrs[i] for i in invOrder]))
+            push!(allMs,AT[currMs[i] for i in invOrder])
+            push!(allErrors,ET[currErrs[i] for i in invOrder])
         end
     end
-    allMs = [[allMs[i][j] for i in eachindex(allMs)] for j in eachindex(allMs[1])]
-    allErrors = [[allErrors[i][j] for i in eachindex(allErrors)] for j in eachindex(allErrors[1])]
+    allMs = [AT[allMs[i][j] for i in eachindex(allMs)] for j in eachindex(allMs[1])]
+    allErrors = [ET[allErrors[i][j] for i in eachindex(allErrors)] for j in eachindex(allErrors[1])]
     #Get the intervals
     allIntervals = [trackedInterval]
     
     for thisDim in dimSet
         newMidpoint = trackedInterval.nextTransformPoints[thisDim]
-        newSubinterval = ones(type, size(trackedInterval.interval)) #TODO: Make this outside for loop
+        newSubinterval = ones(ET, size(trackedInterval.interval)) #TODO: Make this outside for loop
         newSubinterval[1,:] .= -1
-        newIntervals = []
+        newIntervals = typeof(trackedInterval)[]
         for oldInterval in allIntervals
             newInterval1 = copyInterval(oldInterval)
             newInterval2 = copyInterval(oldInterval)
@@ -925,10 +1022,14 @@ relApproxTol : double
 absApproxTol : double
     The absolute error increase allowed
 """
-# See fast_trimMs: an absolute allowance trims real information out of small-valued functions.
-function trimMs(Ms, errors, relApproxTol=type(1e-3), absApproxTol=type(0))
+# absApproxTol is 0, not a bare macheps: the allowance below is compared against sums of
+# coefficients, so an absolute floor trims real information out of any function whose values
+# are well below 1 -- at scale 1e-8 a 2^-52 allowance is a relative tolerance of 2e-8, and the
+# roots lose accuracy in proportion. The remaining term is relative to the error already
+# carried, which is the right scale. Matches the python implementation.
+function trimMs(Ms, errors, relApproxTol=1e-3, absApproxTol=0.0)
     dim = ndims(Ms[1])
-    buf = eltype(Ms[1])[]
+    buf = Vector{eltype(Ms[1])}()
     for polyNum in 1:dim #Loop through the polynomials
         allowedErrorIncrease = absApproxTol + errors[polyNum] * relApproxTol
         for currDim in dim:-1:1
@@ -942,6 +1043,7 @@ function trimMs(Ms, errors, relApproxTol=type(1e-3), absApproxTol=type(0))
             M = Ms[polyNum]
             size_d = size(M, currDim)
             kept = size_d
+            # Sum the highest-degree slice along currDim.
             lastSum = absSumSliceAt(M, currDim, kept, buf)
             # Iteratively eliminate the highest degree row of the current dimension if
             # the sum of its approximation coefficients is of low error, but keep deg at least 2
@@ -965,7 +1067,8 @@ end
 Gathers the slice into a dense buffer and reduces that, rather than reducing a strided view:
 a view reduces in a different order and so would not agree to the last bit with the
 `sum(abs.(M[slice...]))` this replaces. The buffer is reused across the trimming loop."""
-function absSumSliceAt(M::AbstractArray{T}, d::Int, j::Int, buf::Vector{T} = T[]) where {T}
+function absSumSliceAt(M::AbstractArray{T}, d::Int, j::Int,
+                            buf::Vector{T} = Vector{T}()) where {T}
     before = 1
     @inbounds for k in 1:d-1
         before *= size(M, k)
@@ -1016,11 +1119,15 @@ boundingBoxesExterior : list of arrays (optional)
     interval
 """
 function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
+    # Every list of intervals below holds this one concrete type. Untyped `[]` lists made the result of
+    # each recursive call unknown to the compiler, so every append! and loop over them was dispatched at
+    # run time.
+    IT = typeof(trackedInterval)
 
     #TODO: Check if trackedInterval.interval has width 0 in some dimension, in which case we should get rid of that dimension.
     #If the interval is a point, return it
     if isPoint(trackedInterval)
-        return [], [trackedInterval]
+        return IT[], IT[trackedInterval]
     end
 
     #If we ever change the options in this function, we will need to do a copy here.
@@ -1032,10 +1139,16 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     #If the absolute value of the constant term for any of the chebyshev polynomials is greater than the sum of the
     #absoulte values of any of the other terms, it will return that there are no zeros on that interval
     if solverOptions.constant_check
-        consts = [M[1] for M in Ms]
-        err = [sum(abs, M)-abs(c)+e for (M,e,c) in zip(Ms,errors,consts)]
-        if any(abs.(consts) .> err)
-            return [], []
+        tooBig = false
+        @inbounds for i in eachindex(Ms)
+            c = Ms[i][1]
+            if abs(c) > sum(abs, Ms[i]) - abs(c) + errors[i]
+                tooBig = true
+                break
+            end
+        end
+        if tooBig
+            return IT[], IT[]
         end
     end
 
@@ -1044,7 +1157,7 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     if (solverOptions.low_dim_quadratic_check && ndims(Ms[1]) <= 3) || solverOptions.all_dim_quadratic_check
         for i in eachindex(Ms)
             if quadraticCheck(Ms[i], errors[i])
-                return [], []
+                return IT[], IT[]
             end
         end
     end
@@ -1063,14 +1176,15 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     originalInterval = copyInterval(trackedInterval)
     originalIntervalSize = sizeOfInterval(trackedInterval)
     #Zoom in while we can
-    global should_stop = false
+    # A local: as a global, every read of it was a lookup of a value of unknown type.
+    should_stop = false
     lastSizes = dimSize(trackedInterval)
     while changed && zoomCount <= solverOptions.maxZoomCount
         #Zoom in until we stop changing or we hit machine epsilon
         Ms, errors, trackedInterval, changed, should_stop = zoomInOnIntervalIter(Ms, errors, trackedInterval, solverOptions.exact)
 
         if trackedInterval.empty #Throw out the interval
-            return [], []
+            return IT[], IT[]
         end
         #Only count in towards the max is we don't cut the interval in half
         newSizes = dimSize(trackedInterval)
@@ -1088,10 +1202,10 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
             end
             if isExteriorInterval(originalInterval, trackedInterval)
                 #input("val:")
-                return [], [trackedInterval]
+                return IT[], IT[trackedInterval]
             else
                 #input("val:")
-                return [trackedInterval], []
+                return IT[trackedInterval], IT[]
             end
         else
             startFinalStep(trackedInterval)
@@ -1101,7 +1215,7 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
     elseif trackedInterval.finalStep
         trackedInterval.canThrowOutFinalStep = true
         allMs, allErrors, allIntervals = getSubdivisionIntervals(Ms, errors, trackedInterval, solverOptions.exact, solverOptions.level;oneDimension=false)
-        resultsAll = []
+        resultsAll = IT[]
         for (newMs, newErrs, newInt) in zip(allMs, allErrors, allIntervals)
             newInterior, newExterior = solvePolyRecursive(newMs, newInt, newErrs, solverOptions)
             append!(resultsAll, newInterior)
@@ -1111,16 +1225,16 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
             #Can't throw out final step! This might not actually be a root though!
             trackedInterval.possibleExtraRoot = true
             if isExteriorInterval(originalInterval, trackedInterval)
-                return [], [trackedInterval]
+                return IT[], IT[trackedInterval]
             else
-                return [trackedInterval], []
+                return IT[trackedInterval], IT[]
             end
         else
             #Combine all roots that converged to the same point.
-            allFoundRoots = Set([])
-            tempResults = []
+            allFoundRoots = Set{Vector{eltype(trackedInterval.interval)}}()
+            tempResults = IT[]
             for result in resultsAll
-                point = Tuple(result.interval[1,:])
+                point = result.interval[1,:]
                 if point in allFoundRoots
                     continue
                 end
@@ -1135,9 +1249,9 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                 end
             end
             if isExteriorInterval(originalInterval, trackedInterval)
-                return [], [trackedInterval]
+                return IT[], IT[trackedInterval]
             else
-                return [trackedInterval], []
+                return IT[trackedInterval], IT[]
             end
             #TODO: Don't subdivide in the final step in dimensions that are already points!
         end
@@ -1160,9 +1274,9 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                         " are continuous, smooth, and have only finitely many simple roots on the" *
                         " search interval, or raise maxLevel in SolverOptions." maxlog=1
             if isExteriorInterval(originalInterval, trackedInterval)
-                return [], [trackedInterval]
+                return IT[], IT[trackedInterval]
             else
-                return [trackedInterval], []
+                return IT[trackedInterval], IT[]
             end
         end
         if solverOptions.level == 15
@@ -1173,7 +1287,7 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
                         "Ensure the input functions meet the requirements of being continuous, smooth," *
                         "and having only finitely many simple roots on the search interval."
         end
-        resultInterior, resultExterior = [], []
+        resultInterior, resultExterior = IT[], IT[]
         #Get the new intervals and polynomials
         allMs, allErrors, allIntervals = getSubdivisionIntervals(Ms, errors, trackedInterval, solverOptions.exact, solverOptions.level;oneDimension=false)
         #Run each interval
@@ -1236,7 +1350,7 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
             idx2 = idx1 + 1
         end
         #Rerun, check if still on exterior
-        newResultExterior = []
+        newResultExterior = IT[]
         for tempInterval in resultExterior
             if tempInterval.reRun
                 if isapprox(tempInterval.interval,originalInterval.interval)
@@ -1269,7 +1383,7 @@ Parameters
 ----------
 Ms : Vector{Array}
 The Chebyshev approximations of the functions on the interval given to CombinedSolver
-errors : Vector{Float64}
+errors : Vector{T}
 The max error of the Chebyshev approximation from the function on the interval
 verbose : Bool
 Defaults to false. Whether or not to output progress of solving to the terminal.
@@ -1304,7 +1418,8 @@ function solveChebyshevSubdivision(Ms, errors; verbose = false, returnBoundingBo
 
     # Solve
     ndim = length(Ms)
-    originalInterval = TrackedInterval(hcat(fill(type(-1),ndim), fill(type(1),ndim))')
+    T = eltype(Ms[1])
+    originalInterval = TrackedInterval{T}(hcat(fill(-one(T),ndim), fill(one(T),ndim))')
     solverOptions = SolverOptions()
     solverOptions.verbose = verbose
     solverOptions.exact = exact
@@ -1320,7 +1435,7 @@ function solveChebyshevSubdivision(Ms, errors; verbose = false, returnBoundingBo
     b1, b2 = solvePolyRecursive(Ms, originalInterval, errors, solverOptions)
 
     boundingIntervals = append!(b1, b2)
-    roots = []
+    roots = Vector{T}[]
     hasDupRoots = false
     hasExtraRoots = false
 
