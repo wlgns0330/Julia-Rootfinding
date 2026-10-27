@@ -14,6 +14,7 @@ include("QuadraticCheckTest.jl")
 include("PolynomialTests.jl")
 include("SolveApiTest.jl")
 include("ChebfunSuiteTest.jl")
+include("MultipleRootsTest.jl")
 
 # Each suite runs inside one outer testset so that a failure in one does not abort the
 # rest -- an inner testset that fails records the failure and the run continues, where
@@ -27,6 +28,7 @@ function test_all()
         test_all_QuadraticCheck()
         test_all_Polynomial()
         test_all_ChebfunSuite()
+        test_all_MultipleRoots()
     end
 end
 

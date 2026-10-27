@@ -1,5 +1,6 @@
 import YRoots
 using Test
+using LinearAlgebra: qr
 
 # Tests for the public entry point, YRoots.solve(funcs, a, b).
 #
@@ -54,6 +55,8 @@ function test_all_SolveApi()
         test_solve_validatesInput()
         test_solve_generalPrecisionSeparatesCloseRoots()
         test_solve_lowPrecisionPolynomialDoesNotRunAway()
+        test_solve_doubleRootWhereOneFunctionTouchesZero()
+        test_solve_boxOfARootAtTheOriginContainsTheOrigin()
     end
 end
 
@@ -503,5 +506,47 @@ function test_solve_lowPrecisionPolynomialDoesNotRunAway()
                                     roundoff=11, returnBoundingBoxes=true)
         @test length(roots) == length(boxes)
         @test all(any(all(box[1, :] .<= e .<= box[2, :]) for box in boxes) for e in expected)
+    end
+end
+
+function test_solve_doubleRootWhereOneFunctionTouchesZero()
+    @testset "solve keeps a double root where one function only touches zero" begin
+        # Regression test: (x - .3)^2 = y - .1 = 0 returned nothing. Its Chebyshev approximation is
+        # purely quadratic, and the quadratic check computed the sum of the non-quadratic coefficients
+        # as sum(abs, M) minus the quadratic ones. That cancelled to just below zero, below the rounded
+        # minimum of the quadratic part, so the whole search box was thrown out. Once past that, the
+        # final step's box had y of width zero; getSubdivisionDims treated every dimension as
+        # collapsed, kept only y, and then had no dimension left to subdivide.
+        #
+        # The double root may come back as one point or as a pair; either way it must be boxed.
+        root = [0.3, 0.1]
+        roots, boxes = YRoots.solve([(x, y) -> (x - 0.3)^2, (x, y) -> y - 0.1], [-1.0, -1.0], [1.0, 1.0];
+                                    returnBoundingBoxes=true)
+        @test length(roots) > 0
+        @test all(maximum(abs.(r .- root)) < 1e-6 for r in roots)
+        @test any(all(box[1, :] .<= root .<= box[2, :]) for box in boxes)
+    end
+end
+
+"""A fixed orthogonal `dim x dim` matrix, from the QR factorization of a matrix with entries in [-1, 1]."""
+fixedOrthogonal(dim, seed) = Matrix(qr([sin(seed * (7i + 3j)) for i in 1:dim, j in 1:dim]).Q)
+
+"""Noferini and Townsend's p_i(x) = x_i^2 + eps*(Qx)_i, whose origin is a simple root for eps > 0."""
+devastatingExample(Q, eps) = [(x...) -> x[i]^2 + eps * sum(Q[i, j] * x[j] for j in 1:size(Q, 1)) for i in 1:size(Q, 1)]
+
+function test_solve_boxOfARootAtTheOriginContainsTheOrigin()
+    @testset "the box of the devastating example's root at the origin contains it" begin
+        # Regression test: the first zoom on [-1,1]^dim used to cut a bound past 0. On [-1,1] each
+        # x_i^2 has its T_2 term at its full size of -1/2 at x = 0, so the linear bound through the
+        # origin is tight. boundingIntervalLinearSystem computed it as center + width from the solve of
+        # the linear system, both about 1/eps in size. Their rounding error, relative to those numbers
+        # rather than to the bound, could leave the box of the root at the origin just short of 0.
+        for (dim, eps, seed) in ((2, 1e-2, 1), (2, 1e-3, 1), (2, 1e-3, 2), (3, 1e-4, 1), (3, 1e-4, 2))
+            roots, boxes = YRoots.solve(devastatingExample(fixedOrthogonal(dim, seed), eps), -1.0, 1.0;
+                                        returnBoundingBoxes=true)
+            origin = zeros(dim)
+            @test any(maximum(abs.(r)) < 1e-12 for r in roots)
+            @test any(all(box[1, :] .<= origin .<= box[2, :]) for box in boxes)
+        end
     end
 end

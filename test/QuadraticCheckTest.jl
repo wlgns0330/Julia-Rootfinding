@@ -1,4 +1,4 @@
-using YRoots: get_fixed_vars, quadraticCheck, quadraticCheck2D, quadraticCheck3D, quadraticCheckND
+using YRoots: getOtherSum, get_fixed_vars, quadraticCheck, quadraticCheck2D, quadraticCheck3D, quadraticCheckND
 using Test
 
 # Tests for QuadraticCheck.jl, reworked from tests/test_QuadraticCheck.py in
@@ -103,6 +103,8 @@ function test_all_QuadraticCheck()
         test_quadraticCheck_agreement()
         test_quadraticCheck_tolerance()
         test_quadraticCheck_inputHandling()
+        test_getOtherSum()
+        test_quadraticCheck_keepsADoubleRoot()
     end
 end
 
@@ -329,5 +331,34 @@ function test_quadraticCheck_inputHandling()
         # ...and a large one is not, because it can dominate the constant.
         coeff[5, 5] = 20.0
         @test quadraticCheck2D(coeff, QC_TOL) == false
+    end
+end
+
+function test_getOtherSum()
+    @testset "getOtherSum clamps the cancelled sum and adds a rounding margin" begin
+        # When (almost) all of the mass is in the quadratic part, sum(abs, M) minus the quadratic
+        # coefficients can cancel to slightly below zero; that must not pull the bound below tol.
+        @test getOtherSum(-2.2e-16, 1.0, 9, 0.0) > 0
+        @test getOtherSum(-2.2e-16, 1.0, 9, 1e-10) > 1e-10
+        # The margin is a few hundred ulps of the coefficients' size, in their own precision.
+        @test getOtherSum(0.0, 1.0, 9, 0.0) == (9 + 32) * eps(Float64)
+        @test getOtherSum(0.0f0, 1.0f0, 9, 0.0f0) == (9 + 32) * eps(Float32)
+        @test getOtherSum(0.5, 1.0, 9, 0.0) > 0.5
+    end
+end
+
+function test_quadraticCheck_keepsADoubleRoot()
+    @testset "the quadratic check keeps a quadratic that only touches zero" begin
+        # (x - .3)^2 = 0.59 - 0.6 T_1(x) + 0.5 T_2(x) has a double root at x = .3, where its quadratic
+        # part touches zero; rounding in its evaluation there must not throw the box out. In the
+        # Julia layout x is the last axis.
+        @test !quadraticCheck2D([0.59 -0.6 0.5], 0.0)
+        @test !quadraticCheck3D(reshape([0.59, -0.6, 0.5], 1, 1, 3), 0.0)
+        @test !quadraticCheckND(reshape([0.59, -0.6, 0.5], 1, 1, 3), 0.0)
+        # Shifted to (x - .3)^2 + y^2 the root is a double root in both directions.
+        M = zeros(3, 3)
+        M[1, 1] = 0.59 + 0.5; M[1, 2] = -0.6; M[1, 3] = 0.5; M[3, 1] = 0.5
+        @test !quadraticCheck2D(M, 0.0)
+        @test !quadraticCheckND(M, 0.0)
     end
 end

@@ -12,6 +12,32 @@ function get_fixed_vars(dim)
     return reduce(vcat,[collect(IterTools.subsets(1:dim,Val{i}())) for i in dim-1:-1:1])
 end
 
+"""
+    getOtherSum(other_abs, abs_total, num_terms, tol)
+
+Bound the non-quadratic terms plus the floating point error of the check.
+
+`other_abs` is the absolute sum of the non-quadratic coefficients. When it is computed as `abs_total`
+minus the absolute sum of the quadratic part, the subtraction can cancel to a slightly negative number
+when (almost) all of the mass is in the quadratic part, so it is clamped at zero. A rounding margin
+covering the coefficient sums and the evaluation of the quadratic part is added, in units of the
+coefficients' own precision. Without both, a quadratic part that only touches zero (a double root
+such as `(x-.3)^2`) can evaluate a few ulps above `other_sum` at its minimum, and the box containing
+the root is thrown out.
+
+# Arguments
+- `other_abs`: the (possibly cancelled) sum of the absolute values of the non-quadratic coefficients.
+- `abs_total`: the sum of the absolute values of all the coefficients.
+- `num_terms`: the number of coefficients summed, which bounds the number of rounded operations.
+- `tol`: the bound of the sup norm error of the Chebyshev approximation.
+
+Returns the bound to compare the extreme values of the quadratic part against.
+"""
+function getOtherSum(other_abs, abs_total, num_terms, tol)
+    rounding = (num_terms + 32) * eps(float(typeof(abs_total))) * abs_total
+    return max(other_abs, zero(other_abs)) + tol + rounding
+end
+
 function quadraticCheck2D(test_coeff,tol)
     if ndims(test_coeff) != 2
         return false
@@ -39,7 +65,8 @@ function quadraticCheck2D(test_coeff,tol)
         c[6] = test_coeff[3,1]
     end
 
-    other_sum = sum(abs, test_coeff) - sum(abs.(c)) + tol
+    abs_total = sum(abs, test_coeff)
+    other_sum = getOtherSum(abs_total - sum(abs, c), abs_total, length(test_coeff), tol)
     k0 = c[1]-c[4]-c[6]
     k3 = 2*c[4]
     k5 = 2*c[6]
@@ -214,7 +241,8 @@ function quadraticCheck3D(test_coeff,tol)
     end
 
     #The sum of the absolute values of everything else
-    other_sum = sum(abs, test_coeff) - sum(abs.(c)) + tol
+    abs_total = sum(abs, test_coeff)
+    other_sum = getOtherSum(abs_total - sum(abs, c), abs_total, length(test_coeff), tol)
 
     #function for evaluating c0 + c1x + c2y +c3z + c4xy + c5xz + c6yz + c7T_2(x) + c8T_2(y) + c9T_2(z)
     # Use the Horner form because it is much faster, also do any repeated computatons in advance
@@ -641,7 +669,8 @@ function quadraticCheckND(test_coeff, tol)
     end
 
     #The sum of the absolute values of everything else
-    other_sum = sum(abs, test_coeff) .+ tol
+    other_abs = sum(abs, test_coeff)
+    other_sum = getOtherSum(other_abs, other_abs + sum(abs, quad_coeff), length(test_coeff), tol)
 
     #iterator for sides
     fixed_vars = get_fixed_vars(dim)

@@ -69,6 +69,48 @@ end
 asType(::Type{T}, x::AbstractArray{T}) where {T} = x
 asType(::Type{T}, x::AbstractArray) where {T} = T.(x)
 
+"""
+    isBelowResolution(Ms, errors, maxVariation=100)
+
+Whether every polynomial is within a few times its error of a constant on the interval.
+
+The sum of the absolute values of the non-constant coefficients bounds how much a polynomial
+varies across the interval. Once that is only a small multiple of its approximation error for
+every polynomial, the approximations cannot tell where in the interval a root is, and
+subdividing cannot tell either. This happens at a root where every function touches zero,
+such as (x-.2)^2 = (y+.1)^2 = 0: zooming stalls in a box about 1e-7 wide in which every
+function stays within rounding of zero, and further subdivision never ends.
+
+A polynomial that is exactly constant on the interval does not count. If the constant is not
+zero the constant term check has already thrown the interval out, and if it is zero every
+point is a root, which is not a root that stopping here could report. Without this, the zero
+polynomial would stop on the whole search interval, and solve would then re-solve it piece by
+piece down to minBoundingIntervalSize.
+
+Parameters
+----------
+Ms : list of arrays
+    The Chebyshev coefficient tensors of each approximation
+errors : array
+    An upper bound on the error of each Chebyshev approximation
+maxVariation : number
+    How many times its error each polynomial may vary by and still count as unresolved.
+
+Returns
+-------
+bool
+    True if every polynomial varies, but by no more than maxVariation times its error.
+"""
+function isBelowResolution(Ms, errors, maxVariation=100)
+    for (M, e) in zip(Ms, errors)
+        variation = sum(abs, M) - abs(M[1])
+        if variation <= 0 || variation > maxVariation*e
+            return false
+        end
+    end
+    return true
+end
+
 """Gets the linear terms of the Chebyshev coefficient tensor M.
 
 Uses the fact that the linear terms are located at
@@ -143,22 +185,33 @@ b : array
     lower bound
     
 """
-function linearCheck1(totalErrs,A,consts)
+function linearCheck1(totalErrs,A,consts,macheps=eps(eltype(A)))
     dim = size(A, 2)
     T = eltype(A)
     a = fill(T(-Inf), dim)
     b = fill(T(Inf), dim)
+    # Each bound is widened by a few ulps of the quantities it was computed from. v1 and v2 can be
+    # far larger than the bound they produce -- on [-1,1] a small linear term makes both huge -- and
+    # when the bound is tight they cancel almost exactly, as they do for x^2 + eps*x at x = 0, where
+    # the rest of the polynomial reaches its full size. The rounding of that cancellation is relative
+    # to v1 and v2, not to the bound, so without the widening it can cut the bound past the root.
+    # boundingIntervalLinearSystem intersects these bounds with the ones from its SVD solve, which
+    # are padded for the same reason, so a root survives only if both are widened. The 16 covers the
+    # rounding in v1, v2 and their difference, plus the rounding in totalErrs itself, which is a long
+    # sum of absolute values and so is relatively accurate but can round down.
+    relPad = 16 * macheps
     @inbounds for row in 1:dim
         for col in 1:dim
             if abs(A[col,row]) > eps(T) #Don't bother running the check if the linear term is too small.
                 v1 = totalErrs[row] / abs(A[col,row]) - 1
                 v2 = 2 * consts[row] / A[col,row]
+                pad = relPad * (abs(v1) + 1 + abs(v2))
                 if v2 >= 0
-                    c = -v1
-                    d = v1-v2
+                    c = -v1 - pad
+                    d = v1-v2 + pad
                 else
-                    c = -v2-v1
-                    d = v1
+                    c = -v2-v1 - pad
+                    d = v1 + pad
                 end
                 a[col] = max(a[col], c)
                 b[col] = min(b[col], d)
@@ -626,7 +679,7 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
     #Run linear algorithm for shrinking or deciding whether to subdivide.
     #This loop will only execute the second time if the interval was not changed on the first iteration and it needs to run again with tighter errors
     #Use the other interval shrinking method
-    a0, b0 = linearCheck1(totalErrs, A, consts)
+    a0, b0 = linearCheck1(totalErrs, A, consts, eps(T))
     a_orig = a0
     b_orig = b0
     F = svd(A')
@@ -667,8 +720,14 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
             # instead, and BLAS's two kernels do not agree to the last bit -- enough to move a
             # root, since these bounds steer the search.
             width = absAinv * reshape(err, :, 1)
-            a = max.(a0, center .- width)
-            b = min.(b0, center .+ width)
+            # center and width can each be much larger than the bounds they give, which then come
+            # from cancellation, so pad by their rounding error, not just by widthToAdd. For
+            # x_i^2 + eps*(Qx)_i on [-1,1]^dim both are about 1/eps, and at the root at the origin
+            # center + width is exactly 0 in one dimension; unpadded, its rounding cut the origin
+            # out of the first zoom.
+            pad = max(condNum,2)*machEps .* (absAinv * reshape(abs.(consts), :, 1) .+ width)
+            a = max.(a0, center .- width .- pad)
+            b = min.(b0, center .+ width .+ pad)
         else
             # Deliberately aliases a0/b0, as before: the in-place scaling below is meant to carry
             # over to the second pass through this loop.
@@ -814,14 +873,24 @@ allDims : numpy array
 """
 function getSubdivisionDims(Ms,trackedInterval,level)
     dim = length(Ms)
-    dims_to_consider = collect(1:dim)
-    new_dims = Int[]
-    for i in 1:dim
-        if !isapprox(trackedInterval.interval[1,i], trackedInterval.interval[2,i],rtol=1e-5,atol=1e-8) || (i == dim && length(new_dims) == 0)
-            push!(new_dims,dims_to_consider[i])
+    collapsed = [isapprox(trackedInterval.interval[1,i], trackedInterval.interval[2,i],rtol=1e-5,atol=1e-8) for i in 1:dim]
+    if all(collapsed)
+        # Keep one dimension to subdivide in. In the final step, which isolates a single root, use
+        # the widest one: at a multiple root such as (x-.3)^2 = y-.1 = 0 zooming pins y to a point,
+        # and subdividing a dimension of length zero makes no progress (and at level <= 5 leaves no
+        # dimension at all). Elsewhere keep the last one; using the widest there too makes nearly
+        # singular systems branch exponentially instead of failing fast. The last one still gives way to
+        # the widest when its width is exactly 0, since the width filter below would remove it and leave
+        # nothing to subdivide.
+        dimSizes = dimSize(trackedInterval)
+        if trackedInterval.finalStep || dimSizes[dim] == 0
+            dims_to_consider = [argmax(dimSizes)]
+        else
+            dims_to_consider = [dim]
         end
+    else
+        dims_to_consider = findall(!, collapsed)
     end
-    dims_to_consider = new_dims
     if level > 5
         idxs_by_dim = [reverse(dims_to_consider[sortperm(reverse(collect(size(M)))[(dims_to_consider)])]) for M in Ms]
         return idxs_by_dim
@@ -1192,6 +1261,12 @@ function solvePolyRecursive(Ms,trackedInterval,errors,solverOptions)
             zoomCount += 1
         end
         lastSizes = newSizes
+    end
+
+    # Stop rather than subdivide an interval no approximation can resolve. The final step treats
+    # the approximations as exact and still has its own subdivision to separate close roots.
+    if !should_stop && !trackedInterval.finalStep && isBelowResolution(Ms, errors)
+        should_stop = true
     end
 
     if should_stop

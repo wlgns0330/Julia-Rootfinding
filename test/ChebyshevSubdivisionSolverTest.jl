@@ -1,6 +1,6 @@
 using YRoots: SolverOptions, TrackedInterval, TransformChebInPlaceND, boundingIntervalLinearSystem, getFinalPoint,
     getInverseOrder, getLastTransform, getLinearTerms, getSubdivisionDims, getSubdivisionIntervals,
-    getTransformationError, isExteriorInterval, linearCheck1, reduceSolvedDim, solveChebyshevSubdivision,
+    getTransformationError, isBelowResolution, isExteriorInterval, linearCheck1, reduceSolvedDim, solveChebyshevSubdivision,
     solvePolyRecursive, transformCheb, transformChebInPlace1D, transformChebToInterval, trimMs,
     zoomInOnIntervalIter
 using Test
@@ -80,6 +80,8 @@ function test_all_ChebyshevSubdivisionSolver()
     @testset "All tests in ChebyshevSubdivisionSolverTest.jl" begin
         test_getLinearTerms()
         test_linearCheck1()
+        test_linearCheck1_keepsARootWhereTheBoundIsTight()
+        test_isBelowResolution()
         test_reduceSolvedDim()
         test_transformChebInPlace1D()
         test_transformChebInPlaceND()
@@ -87,6 +89,7 @@ function test_all_ChebyshevSubdivisionSolver()
         test_transformCheb()
         test_transformChebToInterval()
         test_getSubdivisionDims()
+        test_getSubdivisionDims_keepsADimensionThatCanStillBeSplit()
         test_getInverseOrder()
         test_getSubdivisionIntervals()
         test_boundingIntervalLinearSystem()
@@ -166,8 +169,10 @@ function test_linearCheck1()
         expecteda4 = [0.]
         expectedb4 = [0.]
         ao4,bo4 = linearCheck1(totalErrs4,A4,consts4)
-        @test isapprox(expecteda4,ao4)
-        @test isapprox(expectedb4,bo4)
+        # The bounds are exactly 0 before linearCheck1 widens them by a few ulps of 1, which no
+        # relative tolerance accepts against an expected 0.
+        @test isapprox(expecteda4,ao4; atol=1e-14)
+        @test isapprox(expectedb4,bo4; atol=1e-14)
 
         A5 = [-.843750000; -1.87818750; -1.84275000; -.0107162044; -.00639690758; -.0137320288;;
                 1.76080078; -.211296094; -.207309375; -.0159523129; .00889275657; -.0159523129;;
@@ -12069,5 +12074,55 @@ function test_solveChebyshevSubdivision()
             # ...and because the root is isolated, the box has closed to a point.
             @test all(BI.interval[2,:] .- BI.interval[1,:] .< 1e-12)
         end
+    end
+end
+function test_linearCheck1_keepsARootWhereTheBoundIsTight()
+    @testset "linearCheck1 keeps a root where its bound is tight" begin
+        # x^2 + e*x on [-1,1] is 0.5 + e*T_1 + 0.5*T_2. At its root x = 0, T_2 = -1 cancels the
+        # constant, so the bound on that side is exactly 0 -- but it is found as the difference of two
+        # numbers about 1/|e| in size, which for these e rounds to just the wrong side of 0.
+        for e in (1e-3, -7e-4)
+            a, b = linearCheck1([1 + abs(e)], fill(e, 1, 1), [0.5])
+            @test a[1] <= 0 <= b[1]
+            @test min(-a[1], b[1]) < 1e-10   # widened by rounding error only, so still tight at 0
+        end
+    end
+end
+
+function test_isBelowResolution()
+    @testset "isBelowResolution" begin
+        # Varies by 3e-14 against an error of 1e-15: within 100 times its error, so unresolved.
+        tiny = [1e-16 1e-14; 2e-14 0.0]
+        @test isBelowResolution([tiny, tiny], [1e-15, 1e-15])
+        # Every polynomial has to be unresolved, not just one.
+        @test !isBelowResolution([tiny, [0.0 1.0; 0.0 0.0]], [1e-15, 1e-15])
+        # More than 100 times its error.
+        @test !isBelowResolution([tiny], [1e-17])
+        # A polynomial constant on the interval does not count, so the zero polynomial does not stop.
+        @test !isBelowResolution([zeros(2, 2)], [eps(Float64)])
+        @test !isBelowResolution([[1e-16 0.0; 0.0 0.0]], [1e-15])
+    end
+end
+
+function test_getSubdivisionDims_keepsADimensionThatCanStillBeSplit()
+    @testset "getSubdivisionDims keeps a dimension that can still be split" begin
+        # Regression test: a nearly converged box came back with nothing to subdivide. This is the
+        # box the 4D two-double-root system reached in the Python solver's final step. Every width is
+        # under isapprox's 1e-8, so every dimension counted as collapsed and the last one was kept --
+        # which has width exactly 0 -- while dimension 2, the only one with any width left, was
+        # dropped. The width filter then removed the last one too. In the final step the widest
+        # dimension is now kept instead.
+        interval = [6.59812861e-17 -4.04323769e-09 -4.47213595e-01 -8.94427191e-01;
+                    6.59812871e-17  5.62986541e-09 -4.47213595e-01 -8.94427191e-01]
+        Ms = [zeros(1, 1, 3, 2), zeros(1, 1, 3, 2), zeros(2, 2, 1, 1), zeros(2, 2, 1, 1)]
+        tracked = TrackedInterval(interval)
+        tracked.finalStep = true
+        @test getSubdivisionDims(Ms, tracked, 4) == [[2], [2], [2], [2]]
+        # Outside the final step the last dimension is kept, unless it has width exactly 0.
+        tracked = TrackedInterval(interval)
+        @test getSubdivisionDims(Ms, tracked, 4) == [[2], [2], [2], [2]]
+        interval[2, 4] += 1e-9
+        tracked = TrackedInterval(interval)
+        @test getSubdivisionDims(Ms, tracked, 7) == [[4], [4], [4], [4]]
     end
 end
