@@ -17,6 +17,23 @@ function polynomialRoundingError(coeff, macheps)
 end
 
 """
+    warnDuplicateRoots(dupSets)
+
+Warn once about every set of roots that could not be told apart from each other.
+
+`dupSets` holds one vector of roots per bounding box that reports more than one root, in the original
+coordinates. Nothing is printed when it is empty.
+"""
+function warnDuplicateRoots(dupSets)
+    isempty(dupSets) && return
+    formatRoot(root) = "(" * join((@sprintf("%.16g", x) for x in root), ", ") * ")"
+    lines = ["  Set $i: " * join((formatRoot(root) for root in roots), ", ") for (i, roots) in enumerate(dupSets)]
+    @warn "The roots in each of the following sets might be duplicates of each other:\n" *
+          join(lines, "\n") *
+          "\nWe suggest you check the rank of the Jacobian at these points."
+end
+
+"""
 Check the arguments of [`solve`](@ref) and put the bounds in the form it works with, so bad input fails
 up front with an `ArgumentError` naming the problem instead of deep inside the solver, or not at all.
 
@@ -138,31 +155,20 @@ julia> solve([M1, M2], [-5.0, -5.0], [5.0, 5.0]);
     subdivision; it will give up at `maxLevel` and report a wide bounding box.
 """
 
-function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=1e-5, roundoff=53,
-               _refine=true, _maxDegree=nothing)
+function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=1e-5, roundoff=53)
     funcs, a, b = validateSolveInput(funcs, a, b)
     # Every precision runs the same solver, generic over its number type. It solves sub-boxes by
     # calling itself, so the input above is checked once.
     T = solveType(roundoff)
+    # The solves it makes add their sets of possible duplicate roots here, so this call warns about all of them once.
+    dupSets = Any[]
     run() = solveSystem(funcs, a, b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact,
-                       minBoundingIntervalSize=minBoundingIntervalSize, _refine=_refine, _maxDegree=_maxDegree,
-                       numtype=T)
+                       minBoundingIntervalSize=minBoundingIntervalSize, numtype=T, dupSets=dupSets)
     # BigFloat's precision is a global setting; it is set only for this solve, not left changed for the caller.
-    return T === BigFloat ? setprecision(run, BigFloat, roundoff) : run()
+    result = T === BigFloat ? setprecision(run, BigFloat, roundoff) : run()
+    warnDuplicateRoots(dupSets)
+    return result
 end
-
-
-# A root whose final box is wider than this, relative to the size of the search interval's bounds in that
-# dimension (as minBoundingIntervalSize is), converged the slow way an ill-conditioned root does; a simple
-# root's box ends up around 1e-13. Such a box is solved again on a padded neighborhood of itself.
-const REFINE_BOX_SIZE = 1e-10
-# The neighborhood re-solved around a wide box reaches this many of the box's widths past it on each side.
-const REFINE_PADDING = 2
-# An approximation on that neighborhood may not need a degree above this. A smooth function needs only a
-# handful of coefficients on so small an interval. One whose rounding error is large next to its values
-# there (1 - cos(y) near 0, where the cancellation happens inside the function) never converges and
-# keeps doubling its degree, so this is where refinement gives up and the box keeps what it had.
-const REFINE_MAX_DEGREE = 100
 
 """
 The point where a search interval `[a, b]` that could not be shrunk is split, `frac` of the way from
@@ -180,12 +186,11 @@ onto it by the linear change of variables x = (b - a)/2 * t + (b + a)/2, as the 
 isUnitBox(a, b) = all(a .== -1) && all(b .== 1)
 
 """
-Whether every function is a polynomial given as coefficients, a system `_refineWideBoxes` cannot improve.
+Whether every function is a polynomial given as coefficients.
 
-A polynomial is carried onto a neighborhood by transforming its coefficients, and the error of the
-transformed coefficients stays that of the original ones however small the neighborhood, so solving
-there again finds nothing the first solve did not. A callable is approximated afresh on the
-neighborhood, with an error that shrinks with the function's size there, and is refined.
+A polynomial is carried onto a smaller box by transforming its coefficients, and the error of the
+transformed coefficients stays that of the original ones however small the box, while a callable is
+approximated afresh on it, with an error that shrinks with the function's size there.
 """
 allPolynomial(funcs) = all(f isa MultiPower || f isa MultiCheb for f in funcs)
 
@@ -202,13 +207,13 @@ swampedByError(coeffs, err) = err >= sum(abs, coeffs) - abs(coeffs[1])
 
 """
 The roots and boxes one final box of the subdivision solve contributes, in the original coordinates,
-as an entry `(roots, boxes, isWide)` for `_refineWideBoxes`.
+as an entry `(roots, boxes, isDupSet)`.
 
 The box is repeated once per root, so the roots and boxes a solve returns stay paired even when the
-final step keeps several possible duplicates in one box. `isWide` marks a box wider than `wideSize`
-relative to `scale`.
+final step keeps several possible duplicates in one box. `isDupSet` says whether the box reports more
+than one root, which could not be told apart.
 """
-function finalBoxEntry(box, a, b, scale, wideSize)
+function finalBoxEntry(box, a, b)
     transformedBox = transformPoints(box.finalInterval', a, b)'
     boxRoots = Any[]
     if length(box.possibleDuplicateRoots) > 0
@@ -218,71 +223,8 @@ function finalBoxEntry(box, a, b, scale, wideSize)
     else
         push!(boxRoots, transformPoints(getFinalPoint(box), a, b))
     end
-    isWide = maximum((transformedBox[2,:] .- transformedBox[1,:]) ./ scale) > wideSize
-    return (boxRoots, Any[transformedBox for _ in boxRoots], isWide)
+    return (boxRoots, Any[transformedBox for _ in boxRoots], length(boxRoots) > 1)
 end
-
-"""
-Solve again around each root whose final box is wide, and replace that box's roots with what is found.
-
-Two roots closer than about sqrt(macheps) times the width of the interval an approximation was built
-on are one dip below that approximation's error, so they come back as one point, or a pair straddling
-the dip. Neither the error nor the dip is set by the roots: the dip is (d/2)^2 times the function's
-curvature, and the error shrinks with the function's size on the interval. Approximating again on a
-small neighborhood of the box therefore separates roots that are far closer together, whenever the
-function can be evaluated that accurately near them (see allPolynomial for polynomial input).
-
-Each neighborhood is solved with `solveSystem`, called with `kwargs`. `entries` holds one
-`(roots, boxes, isWide)` tuple per final box, in the original coordinates, with each box a 2 x dim
-array whose first row is the lower bound and one box per root. The roots and boxes of each wide entry are replaced. An entry keeps what it had when its neighborhood
-cannot be solved or turns up no root; a neighborhood this small is at the edge of what the solver
-handles: y^2 = 0 on one, for one, reports no root at all, and a function that cannot be evaluated
-accurately there needs a degree above REFINE_MAX_DEGREE.
-"""
-function _refineWideBoxes(funcs, a, b, entries; kwargs...)
-    scale = max.(abs.(a), abs.(b), 1)
-    # Every box in units of scale, and the entry it came from, to decide which entry a root found on a
-    # neighborhood belongs to.
-    allLower = [box[1,:] ./ scale for entry in entries for box in entry[2]]
-    allUpper = [box[2,:] ./ scale for entry in entries for box in entry[2]]
-    boxOwner = [k for (k, entry) in enumerate(entries) for _ in entry[2]]
-    # The entry nearest a point, measured in units of scale.
-    nearestEntry(p) = boxOwner[argmin([maximum(max.(lo .- p ./ scale, p ./ scale .- hi))
-                                       for (lo, hi) in zip(allLower, allUpper)])]
-    for k in eachindex(entries)
-        roots, boxes, isWide = entries[k]
-        isWide || continue
-        box = boxes[1]
-        # Pad in units of the box's widest side in every dimension, so a dimension that already converged
-        # to a subnormal width is still a neighborhood worth approximating on.
-        halfWidth = REFINE_PADDING * maximum((box[2,:] .- box[1,:]) ./ scale) .* scale
-        newA = max.(box[1,:] .- halfWidth, a)
-        newB = min.(box[2,:] .+ halfWidth, b)
-        newRoots, newBoxes = try
-            solveSystem(funcs, newA, newB; returnBoundingBoxes=true, _refine=false,
-                   _maxDegree=REFINE_MAX_DEGREE, kwargs...)
-        catch e
-            (e isa DegreeCapExceeded || e isa StackOverflowError) || rethrow()
-            continue
-        end
-        # The neighborhood can reach into another box; a root that belongs to that box is left to it.
-        # Roots and boxes come back paired, one box per root, so they are kept or dropped together.
-        own = [nearestEntry(r) == k for r in newRoots]
-        any(own) || continue
-        entries[k] = (newRoots[own], newBoxes[own], false)
-    end
-    return entries
-end
-
-"""
-The width above which a root's final box counts as wide (see `_refineWideBoxes`), relative to the bounds.
-
-A simple root's box ends up a few rounding steps wide, so in Float64 that is REFINE_BOX_SIZE. A lower
-precision's boxes are proportionally wider, so its threshold scales up with it (eps^(5/8): 4.7e-5 for
-Float32, 1.3e-2 for Float16); without that every root of a Float32 solve would count as wide and be
-solved again. Callables are approximated in Float64, so BigFloat keeps the Float64 threshold.
-"""
-wideBoxSize(::Type{T}) where {T} = eps(T) > eps(Float64) ? Float64(eps(T))^(5/8) : REFINE_BOX_SIZE
 
 """
 The error bound for a Float64 approximation `coeffs` (whose own error is `approxError`) once it is
@@ -302,14 +244,15 @@ end
 
 """
     solveSystem(funcs, a, b; verbose, returnBoundingBoxes, exact, minBoundingIntervalSize,
-                _refine=true, _maxDegree=nothing, numtype=Float64)
+                numtype=Float64, dupSets=Any[])
 
 The solver behind [`solve`](@ref), in the number type `numtype`, on input `solve` has already checked.
-It solves sub-boxes and wide boxes by calling itself, so that check is not repeated on each of them.
-See `solve` for the arguments; `_refine` and `_maxDegree` are described at `_refineWideBoxes`.
+It solves sub-boxes by calling itself, so that check is not repeated on each of them. See `solve` for
+the arguments. Each set of roots a bounding box could not separate is added to `dupSets`, in the
+original coordinates, for `solve` to warn about once.
 """
 function solveSystem(funcs,a,b; verbose, returnBoundingBoxes, exact, minBoundingIntervalSize,
-                    _refine=true, _maxDegree=nothing, numtype::Type{<:AbstractFloat}=Float64)
+                    numtype::Type{<:AbstractFloat}=Float64, dupSets=Any[])
     T = numtype
     dim = length(funcs)
     polys = Vector{Array{T,dim}}(undef, dim)
@@ -333,7 +276,7 @@ function solveSystem(funcs,a,b; verbose, returnBoundingBoxes, exact, minBounding
             end
         else
             # Always approximated in Float64 (FFTW's DCT has no other type), then converted.
-            approx, approxError = chebApproximate(funcs[i], Float64.(a), Float64.(b); maxDegree=_maxDegree)
+            approx, approxError = chebApproximate(funcs[i], Float64.(a), Float64.(b))
             polys[i] = T.(approx)
             errs[i] = convertedApproxError(T, approx, approxError)
         end
@@ -389,7 +332,7 @@ function solveSystem(funcs,a,b; verbose, returnBoundingBoxes, exact, minBounding
                 println(newB)
             end
             roots, boxes = solveSystem(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize,
-                                      _refine=_refine, _maxDegree=_maxDegree, numtype=T)
+                                      numtype=T, dupSets=dupSets)
             if length(roots) != 0
                 append!(boundingBoxes,boxes)
                 append!(yroots,roots)
@@ -402,13 +345,11 @@ function solveSystem(funcs,a,b; verbose, returnBoundingBoxes, exact, minBounding
         end
     end
 
-    #TODO: Handle if we have duplicate roots or extra roots at the top level. Easiest if we actually return the bounding boxes!
-    #Maybe return the bounding boxes in the recursive steps?
+    #TODO: Handle if we have extra roots at the top level.
     
     #If any of the bounding boxes is too large, re-solve that box.
-    # Each entry is (roots, boxes, isWide); see _refineWideBoxes.
+    # Each entry is (roots, boxes, isDupSet); see finalBoxEntry.
     entries = []
-    scale = max.(abs.(a), abs.(b), 1)
     for box in boundingBoxes
         #Get the relative max size in each dimension. If a or b > 1 in magnitude, minBoundingIntervalSize is a relative number.
         #If they are < 1 in magnitude, it is an absolute number.
@@ -428,19 +369,17 @@ function solveSystem(funcs,a,b; verbose, returnBoundingBoxes, exact, minBounding
                 println(newB)
             end
             roots, boxes = solveSystem(funcs, newA, newB; verbose=verbose, returnBoundingBoxes=true, exact=exact, minBoundingIntervalSize = minBoundingIntervalSize,
-                                      _refine=_refine, _maxDegree=_maxDegree, numtype=T)
+                                      numtype=T, dupSets=dupSets)
             if length(roots) > 0
                 push!(entries, (collect(roots), collect(boxes), false))
             end
         else
-            push!(entries, finalBoxEntry(box, a, b, scale, wideBoxSize(T)))
+            push!(entries, finalBoxEntry(box, a, b))
         end
     end
 
-    if _refine && any(entry[3] for entry in entries) && !allPolynomial(funcs)
-        entries = _refineWideBoxes(funcs, a, b, entries; verbose=verbose, exact=exact,
-                                   minBoundingIntervalSize=minBoundingIntervalSize, numtype=T)
-    end
+    # A box that could not separate its roots reports more than one.
+    append!(dupSets, [entry[1] for entry in entries if entry[3]])
     finalRoots = Any[r for entry in entries for r in entry[1]]
     finalBoxes = Any[bx for entry in entries for bx in entry[2]]
     # Find and return the roots (and, optionally, the bounding boxes)

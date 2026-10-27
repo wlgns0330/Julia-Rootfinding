@@ -1,6 +1,7 @@
 import YRoots
 using Test
 using LinearAlgebra: qr
+using Printf: @sprintf
 
 # Tests for the public entry point, YRoots.solve(funcs, a, b).
 #
@@ -45,18 +46,19 @@ function test_all_SolveApi()
         test_solve_polynomialInputAtAnyScale()
         test_polynomialRoundingError()
         test_trimMs_keepsATinyPolynomial()
-        test_solve_closeRootsOffTheAxes()
         test_solve_doubleRootReportedOnce()
         test_solve_closeRootsOfANoisyFunctionDoNotHang()
-        test_chebApproximate_stopsAtMaxDegree()
         test_subdivisionPoint_staysInsideTheInterval()
         test_solve_oneBoxPerRoot()
         test_solve_polynomialOnAnyBox()
         test_solve_validatesInput()
-        test_solve_generalPrecisionSeparatesCloseRoots()
+        test_solve_generalPrecisionKeepsCloseRoots()
         test_solve_lowPrecisionPolynomialDoesNotRunAway()
         test_solve_doubleRootWhereOneFunctionTouchesZero()
         test_solve_boxOfARootAtTheOriginContainsTheOrigin()
+        test_solve_duplicateRootsAreListedBySet()
+        test_solve_simpleRootsRaiseNoDuplicateWarning()
+        test_warnDuplicateRoots_listsEachSetOnItsOwnLine()
     end
 end
 
@@ -332,26 +334,9 @@ function test_trimMs_keepsATinyPolynomial()
     end
 end
 
-function test_solve_closeRootsOffTheAxes()
-    @testset "solve separates two roots closer than sqrt(macheps)" begin
-        # Regression test: two roots closer than about 1.5e-7 came back as one point between them.
-        # Between the roots the first function dips only to -(d/2)^2, below the error of an
-        # approximation on the whole search box once d is under about sqrt(macheps). The box such a
-        # pair ends up in stays wide, so solve approximates again on a neighborhood of it, where the
-        # error is far smaller.
-        d = 1e-9
-        roots = sortedRoots(YRoots.solve([(x, y) -> (x - y) * (x - y - d), (x, y) -> x + y - 0.5],
-                                         [-1.0, -1.0], [1.0, 1.0]))
-        expected = sortedRoots([[0.25, 0.25], [0.25 + d / 2, 0.25 - d / 2]])
-        @test length(roots) == 2
-        @test length(roots) == 2 && all(isapprox(r, e; atol=1e-3 * d) for (r, e) in zip(roots, expected))
-    end
-end
-
 function test_solve_doubleRootReportedOnce()
     @testset "solve reports a double root once" begin
-        # y^2 = 0 has one root. On a small enough neighborhood its dip vanishes into the error and
-        # solving there finds nothing, so the root found on the whole box has to be kept.
+        # y^2 = 0 has one root, which must come back as one point near the origin.
         roots = YRoots.solve([(x, y) -> x + 0 * y, (x, y) -> y * y], [-1.0, -1.0], [1.0, 1.0])
         @test length(roots) == 1
         @test all(maximum(abs.(r)) < 1e-8 for r in roots)
@@ -359,25 +344,15 @@ function test_solve_doubleRootReportedOnce()
 end
 
 function test_solve_closeRootsOfANoisyFunctionDoNotHang()
-    @testset "solve gives up on a neighborhood it cannot approximate" begin
+    @testset "solve finds the close roots of a noisy function without hanging" begin
         # 1 - cos(t) cancels inside the function, so it is off by about macheps near t = 0 however
-        # small the neighborhood. Approximating it there needs an ever higher degree; solve has to
-        # give up on the neighborhood and keep the point it found on the whole box.
+        # small the box it is approximated on. solve must still finish and report a point there.
         for d in (1e-7, 1e-8)
             g = (x, y) -> 1 - cos(y - d / 2) - (d / 2)^2 / 2
             roots = YRoots.solve([(x, y) -> x + 0 * y, g], [-1.0, -1.0], [1.0, 1.0])
             @test length(roots) >= 1
             @test all(-d < r[2] < 2d for r in roots)
         end
-    end
-end
-
-function test_chebApproximate_stopsAtMaxDegree()
-    @testset "chebApproximate stops at maxDegree" begin
-        f = (x, y) -> cos(60 * x) + y
-        @test_throws YRoots.DegreeCapExceeded YRoots.chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=32)
-        approx, _ = YRoots.chebApproximate(f, [-1.0, -1.0], [1.0, 1.0]; maxDegree=1000)
-        @test maximum(size(approx)) > 32
     end
 end
 
@@ -478,17 +453,19 @@ function test_solve_validatesInput()
     end
 end
 
-function test_solve_generalPrecisionSeparatesCloseRoots()
-    @testset "solve at other precisions separates close roots" begin
+function test_solve_generalPrecisionKeepsCloseRoots()
+    @testset "solve at other precisions keeps close roots" begin
         # Regression test: above 53 bits of roundoff, solve lost both roots of this pair. The
         # approximation is built in Float64, but only rounding at the solve's own precision was
-        # allowed for. It also did not approximate again around a wide box, as Float64 solves did.
+        # allowed for. Two roots this close, well under sqrt(macheps) apart, come back as one point
+        # or a pair in one box, as in Float64; either way every root must be found and boxed.
         d = 1e-9
-        roots = sortedRoots(YRoots.solve([(x, y) -> (x - y) * (x - y - d), (x, y) -> x + y - 0.5],
-                                         [-1.0, -1.0], [1.0, 1.0]; roundoff=80))
-        expected = sortedRoots([[0.25, 0.25], [0.25 + d / 2, 0.25 - d / 2]])
-        @test length(roots) == 2
-        @test length(roots) == 2 && all(isapprox(r, e; atol=1e-3 * d) for (r, e) in zip(roots, expected))
+        roots, boxes = YRoots.solve([(x, y) -> (x - y) * (x - y - d), (x, y) -> x + y - 0.5],
+                                    [-1.0, -1.0], [1.0, 1.0]; roundoff=80, returnBoundingBoxes=true)
+        expected = [[0.25, 0.25], [0.25 + d / 2, 0.25 - d / 2]]
+        @test 1 <= length(roots) <= 2
+        @test all(minimum(maximum(abs.(Float64.(r) .- e)) for e in expected) < 1e-8 for r in roots)
+        @test all(any(all(box[1, :] .<= e .<= box[2, :]) for box in boxes) for e in expected)
     end
 end
 
@@ -548,5 +525,68 @@ function test_solve_boxOfARootAtTheOriginContainsTheOrigin()
             @test any(maximum(abs.(r)) < 1e-12 for r in roots)
             @test any(all(box[1, :] .<= origin .<= box[2, :]) for box in boxes)
         end
+    end
+end
+
+"""Run `solve` and return its result with the messages of the warnings it logged."""
+function solveRecordingWarnings(args...; kwargs...)
+    logs, result = Test.collect_test_logs(min_level=Base.CoreLogging.Warn) do
+        YRoots.solve(args...; kwargs...)
+    end
+    return result, [string(log.message) for log in logs]
+end
+
+"""A root formatted as `warnDuplicateRoots` writes it."""
+formatRootForWarning(root) = "(" * join((@sprintf("%.16g", x) for x in root), ", ") * ")"
+
+function test_solve_duplicateRootsAreListedBySet()
+    @testset "solve lists the sets of possible duplicate roots in one warning" begin
+        # Both factors of the first function vanish at the origin along with the second, so the solver
+        # hands back two points there it cannot tell apart (Chebfun2 case 6.1), or one. Two points are
+        # named in one warning, in the coordinates of the search interval, with a suggestion to check
+        # the Jacobian there.
+        funcs = [(x, y) -> (y - 2x) * (y + 0.5x), (x, y) -> x * (x^2 + y^2 - 1)]
+        roots, messages = solveRecordingWarnings(funcs, -1.0, 1.0)
+        pair = [r for r in roots if maximum(abs.(r)) < 1e-6]
+        dupMessages = [m for m in messages if occursin("duplicates", m)]
+        @test 1 <= length(pair) <= 2
+        @test !any(occursin("Might have duplicate roots", m) for m in messages)
+        if length(pair) == 2
+            @test length(dupMessages) == 1
+            message = dupMessages[1]
+            @test occursin("Set 1:", message) && !occursin("Set 2:", message)
+            @test occursin("We suggest you check the rank of the Jacobian at these points.", message)
+            @test all(occursin(formatRootForWarning(r), message) for r in pair)
+        else
+            @test isempty(dupMessages)
+        end
+    end
+end
+
+function test_solve_simpleRootsRaiseNoDuplicateWarning()
+    @testset "simple roots raise no duplicate warning" begin
+        roots, messages = solveRecordingWarnings([(x, y) -> x - 0.3, (x, y) -> y + 0.2], -1.0, 1.0)
+        @test length(roots) == 1
+        @test !any(occursin("duplicates", m) for m in messages)
+    end
+end
+
+function test_warnDuplicateRoots_listsEachSetOnItsOwnLine()
+    @testset "the duplicate warning lists each set on its own line" begin
+        logs, _ = Test.collect_test_logs(min_level=Base.CoreLogging.Warn) do
+            YRoots.warnDuplicateRoots([[[0.5, 0.5], [0.5000000000062979, 0.5]],
+                                       [[1e-8, 2.0, 0.0], [1.1e-8, 2.0, 0.0], [9e-9, 2.0, 0.0]]])
+        end
+        @test length(logs) == 1
+        @test split(string(logs[1].message), "\n") == [
+            "The roots in each of the following sets might be duplicates of each other:",
+            "  Set 1: (0.5, 0.5), (0.5000000000062979, 0.5)",
+            "  Set 2: (1e-08, 2, 0), (1.1e-08, 2, 0), (9e-09, 2, 0)",
+            "We suggest you check the rank of the Jacobian at these points.",
+        ]
+        logs, _ = Test.collect_test_logs(min_level=Base.CoreLogging.Warn) do
+            YRoots.warnDuplicateRoots([])
+        end
+        @test isempty(logs)
     end
 end

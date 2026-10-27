@@ -1511,7 +1511,6 @@ function solveChebyshevSubdivision(Ms, errors; verbose = false, returnBoundingBo
 
     boundingIntervals = append!(b1, b2)
     roots = Vector{T}[]
-    hasDupRoots = false
     hasExtraRoots = false
 
     for interval in boundingIntervals
@@ -1523,18 +1522,14 @@ function solveChebyshevSubdivision(Ms, errors; verbose = false, returnBoundingBo
         end
         if !isempty(interval.possibleDuplicateRoots)
             append!(roots, interval.possibleDuplicateRoots)
-            hasDupRoots = true
         else
             push!(roots, getFinalPoint(interval))
         end
     end
 
-    # Warn if extra or duplicate roots
+    # Warn if extra roots. Duplicate roots are reported by solve, in the coordinates of the search interval.
     if hasExtraRoots
         @warn "Might have extra roots! See bounding boxes for details!"
-    end
-    if hasDupRoots
-        @warn "Might have duplicate roots! See bounding boxes for details!"
     end
 
     # Return

@@ -1,6 +1,7 @@
 module YRoots
 
 using PrecompileTools
+using Printf
 
 # Every file the package loads, listed here in dependency order. Previously each
 # algorithm file included its own dependencies, which made load order implicit and
