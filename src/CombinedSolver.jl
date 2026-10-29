@@ -82,8 +82,25 @@ or fewer, Float64 for 53 or fewer, and BigFloat (at `roundoff` bits) above that.
 solveType(roundoff) = roundoff <= 11 ? Float16 : roundoff <= 24 ? Float32 : roundoff <= 53 ? Float64 : BigFloat
 
 """
+The `minBoundingIntervalSize` a solve in floating-point type `T` uses when none is given.
+
+`Float64` and `BigFloat` keep the long-standing `1e-5`. A callable is approximated in `Float64` whatever
+the type, so a `BigFloat` solve of one cannot tighten its boxes past a `Float64` solve.
+
+`Float32` uses `eps(Float32)^(1/3)`, about `4.9e-3`, the same cube root of machine epsilon that `1e-5` is
+for `Float64`. Its boxes come out `1e-6` to `2e-4` wide, so under `1e-5` nearly every one was solved again,
+which made a Float32 solve up to 8x slower than a Float64 one for accuracy it was never asked for.
+
+`Float16` uses `8*eps(Float16)`, about `7.8e-3`: the floor the re-solve already applies, since a box only a
+few rounding steps wide cannot be shrunk. Its boxes are only a few steps wide to begin with, and the
+re-solve is what splits or discards the wider ones; at `eps(Float16)^(1/3)` (about `0.1`) or even `0.03`
+they were kept, and a system with 5 roots came back with 7.
+"""
+defaultMinBoundingIntervalSize(T) = T === Float16 ? 8*eps(Float16) : T === Float32 ? eps(Float32)^(1/3) : 1e-5
+
+"""
     solve(funcs, a, b; verbose=false, returnBoundingBoxes=false, exact=false,
-          minBoundingIntervalSize=1e-5, roundoff=53)
+          minBoundingIntervalSize=nothing, roundoff=53)
 
 Find the roots of a system of functions on the search interval `[a, b]`.
 
@@ -110,13 +127,15 @@ search recurses until it zeros in on each root. One point -- and optionally a bo
 - `returnBoundingBoxes::Bool = false`: Also return a bounding box for each root.
 - `exact::Bool = false`: Run the transformations on the approximation in higher precision,
   minimising error at some cost in speed.
-- `minBoundingIntervalSize::Real = 1e-5`: If a root is found whose bounding interval is
+- `minBoundingIntervalSize::Real`: If a root is found whose bounding interval is
   larger than this in every dimension, the system is solved again on the smaller interval.
   Smaller values give more accurate roots but increase solve time, and can cause trouble
   if the functions cannot be evaluated accurately at points close together. The value is
   absolute while the interval in question lies within `[-1, 1]`, and relative otherwise:
   for an interval with an endpoint of magnitude greater than 1, it is multiplied by that
-  magnitude in that dimension.
+  magnitude in that dimension. Defaults to a value for the floating-point type `roundoff`
+  selects: `1e-5` for `Float64` and `BigFloat`, `eps(Float32)^(1/3)` (about `4.9e-3`) for
+  `Float32` and `8*eps(Float16)` (about `7.8e-3`) for `Float16`.
 - `roundoff::Int = 53`: Bits of precision to solve at. `53` (the default, and anything from 25
   to 53) solves in `Float64`, `<= 24` in `Float32`, `<= 11` in `Float16`, and anything above 53 in
   `BigFloat` at that precision. Every precision runs the same solver. A callable is always
@@ -155,11 +174,12 @@ julia> solve([M1, M2], [-5.0, -5.0], [5.0, 5.0]);
     subdivision; it will give up at `maxLevel` and report a wide bounding box.
 """
 
-function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=1e-5, roundoff=53)
+function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=nothing, roundoff=53)
     funcs, a, b = validateSolveInput(funcs, a, b)
     # Every precision runs the same solver, generic over its number type. It solves sub-boxes by
     # calling itself, so the input above is checked once.
     T = solveType(roundoff)
+    minBoundingIntervalSize = something(minBoundingIntervalSize, defaultMinBoundingIntervalSize(T))
     # The solves it makes add their sets of possible duplicate roots here, so this call warns about all of them once.
     dupSets = Any[]
     run() = solveSystem(funcs, a, b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact,

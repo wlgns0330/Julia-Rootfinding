@@ -22,7 +22,7 @@ Returns
 approxError : Float64
     An upper bound on the approximation error
 """
-function getApproxError(degs, epsilons, rhos, macheps=2^-52)
+function getApproxError(degs, epsilons, rhos, macheps=eps(float(mapreduce(typeof, promote_type, rhos))))
     approxError = 0.0
     
     # Create a partition of coefficients where idxs[i]=1 represents coefficients being greater than
@@ -114,7 +114,7 @@ epsVal : float
 rho : float
     The geometric rate of convergence of the coefficients
 """
-function getFinalDegree(coeff,tol,macheps = 2^-52)
+function getFinalDegree(coeff,tol,macheps = eps(float(eltype(coeff))))
 
     # Set the final degree to the position of the last coefficient greater than convergence value
     converged_deg = Int64(div((3 * (length(coeff) - 1) / 4),1)) # Assume convergence at degree 3n/2.

@@ -587,6 +587,19 @@ anyway, so the decomposition was already done in Float32.
 """
 linearSystemType(::Type{T}) where {T} = T === Float16 ? Float32 : T
 
+"""
+The smallest reciprocal condition number at which the linear system in type `T` is solved directly.
+
+`1e-10` for Float64, scaled with `eps(T)`: about `5.4e-5` for Float32, which a Float16 solve's linear
+system also runs in (see linearSystemType). An exactly
+singular matrix computed in `T` comes out with a reciprocal condition number of a few `eps(T)` -- 7e-8 in
+Float32 -- so a fixed `1e-10` passed singular systems in Float32 as well conditioned. The solver then
+padded the solve by more than the interval, concluded it could not shrink even if subdivided, and
+returned the whole interval as one root: a sphere cut by two planes came back as a single box covering
+[-1, 1]^3, which the caller then had to subdivide itself, 8x slower than Float64.
+"""
+minInvCondNum(::Type{T}) where {T} = 1e-10 * (eps(T) / eps(Float64))
+
 """Finds a smaller region in which any root must be.
 
 Parameters
@@ -697,7 +710,7 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
     # Test the reciprocal condition number rather than the condition number itself, so that
     # a singular A gives 0 instead of a divide by zero. S[1] == 0 means A is all zeros.
     invCondNum = S[1] > 0 ? S[end]/S[1] : zero(T)
-    wellConditioned = S[1] > 0 && invCondNum > 1e-10
+    wellConditioned = S[1] > 0 && invCondNum > minInvCondNum(T)
     machEps = eps(T)
     # Add this width to the new intervals we find to avoid rounding error throwing out roots.
     # Solving with Ainv below loses about condNum digits, so the interval it produces has to be

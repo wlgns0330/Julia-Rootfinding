@@ -59,6 +59,8 @@ function test_all_SolveApi()
         test_solve_duplicateRootsAreListedBySet()
         test_solve_simpleRootsRaiseNoDuplicateWarning()
         test_warnDuplicateRoots_listsEachSetOnItsOwnLine()
+        test_solve_minBoundingIntervalSizeFollowsType()
+        test_solve_float32SingularLinearPartSolvesDirectly()
     end
 end
 
@@ -588,5 +590,40 @@ function test_warnDuplicateRoots_listsEachSetOnItsOwnLine()
             YRoots.warnDuplicateRoots([])
         end
         @test isempty(logs)
+    end
+end
+
+function test_solve_minBoundingIntervalSizeFollowsType()
+    @testset "minBoundingIntervalSize default follows the type" begin
+        @test YRoots.defaultMinBoundingIntervalSize(Float64) == 1e-5
+        @test YRoots.defaultMinBoundingIntervalSize(BigFloat) == 1e-5
+        @test YRoots.defaultMinBoundingIntervalSize(Float32) ≈ cbrt(eps(Float32))
+        @test YRoots.defaultMinBoundingIntervalSize(Float16) == 8*eps(Float16)
+
+        # Float32 boxes are wider than 1e-5, so the old default solved each again. With the
+        # Float32 default the roots are still found, to Float32 accuracy, and nothing is re-solved.
+        fs = [(x, y) -> sin(8x)*cos(6y) - 0.2, (x, y) -> x^2 - y - 0.3]
+        ref = sortedRoots(YRoots.solve(fs, -1.0, 1.0))
+        out = sortedRoots(YRoots.solve(fs, -1.0, 1.0; roundoff=24))
+        @test length(out) == length(ref) == 5
+        @test all(isapprox(p, q, atol=1e-5) for (p, q) in zip(out, ref))
+        # Float16 keeps its own floor; a looser one let wide boxes through as extra roots.
+        @test length(YRoots.solve(fs, -1.0, 1.0; roundoff=11)) == 5
+    end
+end
+
+function test_solve_float32SingularLinearPartSolvesDirectly()
+    @testset "a singular linear part is not taken as well conditioned in Float32" begin
+        # The linear terms of this system are exactly singular. Float32 rounding puts their
+        # reciprocal condition number near 1e-7, which the old fixed cutoff of 1e-10 accepted:
+        # the solver then gave up on the whole box and returned it as one root.
+        @test YRoots.minInvCondNum(Float64) == 1e-10
+        fs = [(x,y,z) -> x^2+y^2+z^2-0.6, (x,y,z) -> x-y, (x,y,z) -> y-z+0.1]
+        P = [YRoots.chebApproximate(f, -ones(3), ones(3)) for f in fs]
+        Ms = [Float32.(p[1]) for p in P]
+        errs = Float32[YRoots.convertedApproxError(Float32, p[1], p[2]) for p in P]
+        roots, boxes = YRoots.solveChebyshevSubdivision(Ms, errs; returnBoundingBoxes=true)
+        @test length(roots) == 2
+        @test all(maximum(b.finalInterval[2, :] .- b.finalInterval[1, :]) < 1e-3 for b in boxes)
     end
 end
