@@ -1,5 +1,6 @@
 import YRoots
 using Test
+using DoubleFloats: Double64
 using LinearAlgebra: qr
 using Printf: @sprintf
 
@@ -62,6 +63,7 @@ function test_all_SolveApi()
         test_solve_minBoundingIntervalSizeFollowsType()
         test_solve_float32SingularLinearPartSolvesDirectly()
         test_solve_float16SimpleRootsAreNotBelowResolution()
+        test_solve_highPrecisionIsDouble64()
     end
 end
 
@@ -371,9 +373,9 @@ function test_subdivisionPoint_staysInsideTheInterval()
             @test all(a .< p .< b)
             @test p ≈ a .+ frac .* (b .- a)
         end
-        # A BigFloat solve's float type passes through unchanged.
-        p = YRoots.subdivisionPoint(BigFloat[-100, -100], BigFloat[-99, -99], BigFloat(frac))
-        @test eltype(p) == BigFloat
+        # A Double64 solve's float type passes through unchanged.
+        p = YRoots.subdivisionPoint(Double64[-100, -100], Double64[-99, -99], Double64(frac))
+        @test eltype(p) == Double64
         @test all(-100 .< p .< -99)
     end
 end
@@ -597,7 +599,7 @@ end
 function test_solve_minBoundingIntervalSizeFollowsType()
     @testset "minBoundingIntervalSize default follows the type" begin
         @test YRoots.defaultMinBoundingIntervalSize(Float64) == 1e-5
-        @test YRoots.defaultMinBoundingIntervalSize(BigFloat) == 1e-5
+        @test YRoots.defaultMinBoundingIntervalSize(Double64) == 1e-5
         @test YRoots.defaultMinBoundingIntervalSize(Float32) ≈ cbrt(eps(Float32))
         @test YRoots.defaultMinBoundingIntervalSize(Float16) == 8*eps(Float16)
 
@@ -641,5 +643,30 @@ function test_solve_float16SimpleRootsAreNotBelowResolution()
         roots = YRoots.solveChebyshevSubdivision([Float16.(c)], Float16[YRoots.convertedApproxError(Float16, c, e)])
         @test length(roots) == 7
         @test all(any(abs(Float64(r[1]) - k*pi/10) < 1e-2 for k in -3:3) for r in roots)
+    end
+end
+
+function test_solve_highPrecisionIsDouble64()
+    @testset "roundoff above 53 solves in Double64" begin
+        @test YRoots.solveType(53) == Float64
+        @test YRoots.solveType(54) == Double64
+        @test YRoots.solveType(106) == Double64
+        @test_throws ArgumentError YRoots.solveType(107)
+        @test_throws ArgumentError YRoots.solve([x -> x - 0.1], -1.0, 1.0; roundoff=128)
+
+        # Two roots 1e-9 apart of a polynomial system. Float64 puts both in one box about 1e-7 wide;
+        # Double64 finds each to well past Float64's precision. The roots of these exact coefficients
+        # are where x - y is 0 or d along x + y = 1/2, computed here in BigFloat for reference only.
+        d = 1e-9
+        f = zeros(3, 3); f[3, 1] = 1; f[2, 2] = -2; f[1, 3] = 1; f[2, 1] = -d; f[1, 2] = d
+        g = zeros(2, 2); g[1, 1] = -0.5; g[2, 1] = 1; g[1, 2] = 1
+        roots, boxes = YRoots.solve([YRoots.MultiPower(f), YRoots.MultiPower(g)], -1.0, 1.0;
+                                    roundoff=106, returnBoundingBoxes=true)
+        @test length(roots) == 2
+        @test all(eltype(r) == Double64 for r in roots)
+        dd, half = big(d), big(1) / 2
+        expected = [[half / 2, half / 2], [(half + dd) / 2, (half - dd) / 2]]
+        @test all(minimum(maximum(abs.(big.(r) .- e)) for r in roots) < 1e-20 for e in expected)
+        @test all(any(all(big.(box[1, :]) .<= e .<= big.(box[2, :])) for box in boxes) for e in expected)
     end
 end

@@ -77,15 +77,25 @@ end
 
 """
 The number type `solve` runs in for `roundoff` bits of precision: Float16 for 11 or fewer, Float32 for 24
-or fewer, Float64 for 53 or fewer, and BigFloat (at `roundoff` bits) above that.
+or fewer, Float64 for 53 or fewer, and Double64 for 106 or fewer.
+
+Above 53 bits this used BigFloat at `roundoff` bits. Double64 (DoubleFloats.jl) carries 106 bits as an
+unevaluated sum of two Float64s, so its arithmetic is a handful of Float64 operations rather than calls
+into MPFR: on polynomial input it was 13 to 24 times faster than a 128-bit BigFloat solve, and 2.1 to 4.4
+times slower than Float64, with roots within 1e-20 to 1e-32 of a 256-bit solve. More than 106 bits is
+refused rather than quietly solved at fewer.
 """
-solveType(roundoff) = roundoff <= 11 ? Float16 : roundoff <= 24 ? Float32 : roundoff <= 53 ? Float64 : BigFloat
+function solveType(roundoff)
+    roundoff <= 106 || throw(ArgumentError(
+        "roundoff = $roundoff is above the 106 bits of the most precise type solve supports (Double64)"))
+    return roundoff <= 11 ? Float16 : roundoff <= 24 ? Float32 : roundoff <= 53 ? Float64 : Double64
+end
 
 """
 The `minBoundingIntervalSize` a solve in floating-point type `T` uses when none is given.
 
-`Float64` and `BigFloat` keep the long-standing `1e-5`. A callable is approximated in `Float64` whatever
-the type, so a `BigFloat` solve of one cannot tighten its boxes past a `Float64` solve.
+`Float64` and `Double64` keep the long-standing `1e-5`. A callable is approximated in `Float64` whatever
+the type, so a `Double64` solve of one cannot tighten its boxes past a `Float64` solve.
 
 `Float32` uses `eps(Float32)^(1/3)`, about `4.9e-3`, the same cube root of machine epsilon that `1e-5` is
 for `Float64`. Its boxes come out `1e-6` to `2e-4` wide, so under `1e-5` nearly every one was solved again,
@@ -134,13 +144,14 @@ search recurses until it zeros in on each root. One point -- and optionally a bo
   absolute while the interval in question lies within `[-1, 1]`, and relative otherwise:
   for an interval with an endpoint of magnitude greater than 1, it is multiplied by that
   magnitude in that dimension. Defaults to a value for the floating-point type `roundoff`
-  selects: `1e-5` for `Float64` and `BigFloat`, `eps(Float32)^(1/3)` (about `4.9e-3`) for
+  selects: `1e-5` for `Float64` and `Double64`, `eps(Float32)^(1/3)` (about `4.9e-3`) for
   `Float32` and `8*eps(Float16)` (about `7.8e-3`) for `Float16`.
 - `roundoff::Int = 53`: Bits of precision to solve at. `53` (the default, and anything from 25
-  to 53) solves in `Float64`, `<= 24` in `Float32`, `<= 11` in `Float16`, and anything above 53 in
-  `BigFloat` at that precision. Every precision runs the same solver. A callable is always
-  approximated in `Float64`, so a higher precision can only improve the accuracy of polynomial
-  input ([`MultiPower`](@ref) / [`MultiCheb`](@ref)).
+  to 53) solves in `Float64`, `<= 24` in `Float32`, `<= 11` in `Float16`, and 54 to 106 in
+  `Double64` (106 bits, from DoubleFloats.jl). Above 106 throws an `ArgumentError`. Every
+  precision runs the same solver. A callable is always approximated in `Float64`, so a higher
+  precision can only improve the accuracy of polynomial input ([`MultiPower`](@ref) /
+  [`MultiCheb`](@ref)).
 
 # Returns
 A vector of roots, each a point in the search interval. With `returnBoundingBoxes = true`,
@@ -182,10 +193,8 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
     minBoundingIntervalSize = something(minBoundingIntervalSize, defaultMinBoundingIntervalSize(T))
     # The solves it makes add their sets of possible duplicate roots here, so this call warns about all of them once.
     dupSets = Any[]
-    run() = solveSystem(funcs, a, b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact,
-                       minBoundingIntervalSize=minBoundingIntervalSize, numtype=T, dupSets=dupSets)
-    # BigFloat's precision is a global setting; it is set only for this solve, not left changed for the caller.
-    result = T === BigFloat ? setprecision(run, BigFloat, roundoff) : run()
+    result = solveSystem(funcs, a, b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact,
+                         minBoundingIntervalSize=minBoundingIntervalSize, numtype=T, dupSets=dupSets)
     warnDuplicateRoots(dupSets)
     return result
 end
@@ -254,7 +263,7 @@ The solver allows only for rounding in T. In Float64 that already covers the app
 is unchanged. Below Float64 the conversion to T rounds each coefficient again; above it the Float64
 rounding of the approximation is larger than anything the solver allows for. Either way the coarser of
 the two is added to the bound, rounded up so converting the bound to T cannot shrink it. Without it,
-Float32 returned no roots for a pair 1e-6 apart and an 80-bit BigFloat solve for one 1e-9 apart.
+Float32 returned no roots for a pair 1e-6 apart and an 80-bit solve (then in BigFloat) for one 1e-9 apart.
 """
 function convertedApproxError(::Type{T}, coeffs, approxError) where {T}
     T === Float64 && return approxError

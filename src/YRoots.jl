@@ -1,5 +1,6 @@
 module YRoots
 
+using DoubleFloats: Double64
 using PrecompileTools
 using Printf
 

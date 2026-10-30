@@ -94,8 +94,8 @@ Both types also evaluate directly, via `eval_MultiPower` and `eval_MultiCheb`.
 | `verbose` | `false` | Print approximation shapes and rootfinding progress to the terminal. |
 | `returnBoundingBoxes` | `false` | Return `(roots, boundingBoxes)` instead of just the roots. |
 | `exact` | `false` | Run the transformations in higher precision — more accurate, slower. |
-| `minBoundingIntervalSize` | depends on the type | Re-solve on a smaller interval while a root's box exceeds this size. `1e-5` for `Float64` and `BigFloat`, about `4.9e-3` for `Float32`, about `7.8e-3` for `Float16`. |
-| `roundoff` | `53` | Bits of precision. `53` selects `Float64`; `<= 24` `Float32`, `<= 11` `Float16`, above `53` `BigFloat`. |
+| `minBoundingIntervalSize` | depends on the type | Re-solve on a smaller interval while a root's box exceeds this size. `1e-5` for `Float64` and `Double64`, about `4.9e-3` for `Float32`, about `7.8e-3` for `Float16`. |
+| `roundoff` | `53` | Bits of precision. `53` selects `Float64`; `<= 24` `Float32`, `<= 11` `Float16`, `54` to `106` `Double64` (DoubleFloats.jl). Above `106` is an error. |
 
 See the [`solve` reference](https://wlgns0330.github.io/Julia-Rootfinding/solve/) for the
 details.

@@ -712,7 +712,7 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
     F = svd(A')
     # LAPACK has no Float16 SVD: LinearAlgebra computes it in Float32 and returns Float32 factors.
     # Bring them back to T, so everything after this stays in the solve's type. For Float64 (and
-    # BigFloat, via GenericLinearAlgebra) the factors are already in T and nothing is copied.
+    # Double64, via GenericLinearAlgebra) the factors are already in T and nothing is copied.
     S = asType(T, F.S)
     # Ainv = V * diag(1/S) * U'. Built directly instead of through a chain of adjoints and
     # broadcasts, each of which allocated a dim x dim temporary.

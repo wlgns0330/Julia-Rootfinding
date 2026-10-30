@@ -44,7 +44,7 @@ function quadraticCheck2D(test_coeff,tol)
     end
     interval = [[-1, -1], [1, 1]]
 
-    # In the coefficients' own type: storing BigFloat coefficients in Float64 rounded them inside a
+    # In the coefficients' own type: storing coefficients finer than Float64 in Float64 rounded them inside a
     # check that throws regions out, with an error bound far tighter than that rounding.
     c = zeros(float(eltype(test_coeff)), 6)
     shape = reverse(size(test_coeff))
@@ -207,7 +207,7 @@ function quadraticCheck3D(test_coeff,tol)
     end
 
     #Padding is slow, so check the shape instead.
-    # In the coefficients' own type: storing BigFloat coefficients in Float64 rounded them inside a
+    # In the coefficients' own type: storing coefficients finer than Float64 in Float64 rounded them inside a
     # check that throws regions out, with an error bound far tighter than that rounding.
     c = zeros(float(eltype(test_coeff)), 10)
     shape = reverse(size(test_coeff))

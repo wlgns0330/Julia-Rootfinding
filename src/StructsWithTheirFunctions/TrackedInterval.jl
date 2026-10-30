@@ -29,7 +29,7 @@ mutable struct TrackedInterval{T<:AbstractFloat}
 
     # This struct is implemented by passing in one argument "interval"
     # eg: TrackedInterval([-1;-3.4;0])
-    # T is the number type the solve runs in (Float64 by default; Float32, Float16 or BigFloat for
+    # T is the number type the solve runs in (Float64 by default; Float32, Float16 or Double64 for
     # other roundoff settings). Every field is concrete in T, so the solver compiles to fast code
     # for each type instead of looking types up at run time.
     topInterval::Matrix{T}
