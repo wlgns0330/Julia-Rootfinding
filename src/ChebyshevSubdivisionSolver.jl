@@ -70,7 +70,20 @@ asType(::Type{T}, x::AbstractArray{T}) where {T} = x
 asType(::Type{T}, x::AbstractArray) where {T} = T.(x)
 
 """
-    isBelowResolution(Ms, errors, maxVariation=100)
+The default `maxVariation` of [`isBelowResolution`](@ref) for polynomials of type `T`: 100, or 10 for Float16.
+
+Where every function touches zero the ratio of a polynomial's variation to its error stalls -- at
+2.7 to 5 for (x-.2)^2 = (y+.1)^2 = 0, but between 10 and 100 at the double root of Chebfun2 case 6.1 in
+Float64, which subdivides without end below 100. At a simple root the ratio instead halves with the box,
+so a cutoff of `c` stops a box about `c` times wider than the type can resolve. In Float64 and Float32
+that is far below any box solve keeps. In Float16 it is not: a polynomial varies by only 45 to 90 times
+its error on half of [-1, 1], so both halves stopped there and came back as single boxes, and solve had
+to cut and approximate them again, up to 8x slower than Float64.
+"""
+maxResolutionVariation(::Type{T}) where {T} = T === Float16 ? 10 : 100
+
+"""
+    isBelowResolution(Ms, errors, maxVariation=maxResolutionVariation(eltype(Ms[1])))
 
 Whether every polynomial is within a few times its error of a constant on the interval.
 
@@ -94,14 +107,15 @@ Ms : list of arrays
 errors : array
     An upper bound on the error of each Chebyshev approximation
 maxVariation : number
-    How many times its error each polynomial may vary by and still count as unresolved.
+    How many times its error each polynomial may vary by and still count as unresolved. Defaults
+    to maxResolutionVariation of the coefficients' type.
 
 Returns
 -------
 bool
     True if every polynomial varies, but by no more than maxVariation times its error.
 """
-function isBelowResolution(Ms, errors, maxVariation=100)
+function isBelowResolution(Ms, errors, maxVariation=maxResolutionVariation(eltype(Ms[1])))
     for (M, e) in zip(Ms, errors)
         variation = sum(abs, M) - abs(M[1])
         if variation <= 0 || variation > maxVariation*e

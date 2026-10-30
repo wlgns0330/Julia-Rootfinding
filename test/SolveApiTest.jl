@@ -61,6 +61,7 @@ function test_all_SolveApi()
         test_warnDuplicateRoots_listsEachSetOnItsOwnLine()
         test_solve_minBoundingIntervalSizeFollowsType()
         test_solve_float32SingularLinearPartSolvesDirectly()
+        test_solve_float16SimpleRootsAreNotBelowResolution()
     end
 end
 
@@ -625,5 +626,20 @@ function test_solve_float32SingularLinearPartSolvesDirectly()
         roots, boxes = YRoots.solveChebyshevSubdivision(Ms, errs; returnBoundingBoxes=true)
         @test length(roots) == 2
         @test all(maximum(b.finalInterval[2, :] .- b.finalInterval[1, :]) < 1e-3 for b in boxes)
+    end
+end
+
+function test_solve_float16SimpleRootsAreNotBelowResolution()
+    @testset "Float16 simple roots are not stopped as below resolution" begin
+        @test YRoots.maxResolutionVariation(Float64) == 100
+        @test YRoots.maxResolutionVariation(Float32) == 100
+        @test YRoots.maxResolutionVariation(Float16) == 10
+        # On half of [-1, 1], sin(10x) in Float16 varies by only 45 to 90 times its error. Under
+        # the old cutoff of 100 both halves stopped there and the solver returned [-1, 1] as one
+        # box, which solve then had to cut and approximate again.
+        c, e = YRoots.chebApproximate(x -> sin(10x), [-1.0], [1.0])
+        roots = YRoots.solveChebyshevSubdivision([Float16.(c)], Float16[YRoots.convertedApproxError(Float16, c, e)])
+        @test length(roots) == 7
+        @test all(any(abs(Float64(r[1]) - k*pi/10) < 1e-2 for k in -3:3) for r in roots)
     end
 end
