@@ -65,9 +65,6 @@ function TwoProdWithSplit(a,b,a1,a2)
     return x,y
 end 
 
-"""`x` converted to element type T, or `x` itself when it already has that type (so nothing is copied)."""
-asType(::Type{T}, x::AbstractArray{T}) where {T} = x
-asType(::Type{T}, x::AbstractArray) where {T} = T.(x)
 
 """
 The default `maxVariation` of [`isBelowResolution`](@ref) for polynomials of type `T`: 100, or 10 for Float16.
@@ -614,6 +611,36 @@ returned the whole interval as one root: a sphere cut by two planes came back as
 """
 minInvCondNum(::Type{T}) where {T} = 1e-10 * (eps(T) / eps(Float64))
 
+"""
+The inverse of the small square matrix `At` and its reciprocal condition number, in `At`'s type.
+
+The reciprocal condition number is used rather than the condition number itself, so that a singular
+matrix gives 0 instead of a divide by zero; the inverse of a singular matrix comes back as zeros, and is
+never used, since 0 is below every [`minInvCondNum`](@ref).
+
+For the LAPACK types (Float32 and Float64) both come from the SVD, exactly as before. For any other
+type the SVD is GenericLinearAlgebra's, which on a 2 x 2 Double64 matrix was over a quarter of a whole
+solve, so the inverse comes from an LU factorization instead and the reciprocal condition number from
+1-norms, which is within a factor of the dimension of the 2-norm one.
+"""
+function inverseAndInvCond(At::AbstractMatrix{T}) where {T}
+    if T <: Union{Float32, Float64}
+        F = svd(At)
+        S = F.S
+        # Ainv = V * diag(1/S) * U'. Kept as the original chain of matrix products: on dim x dim with
+        # dim <= 4 this is not hot, and hand-rolling the sums changes the last bit of the result
+        # relative to BLAS. S[1] == 0 means At is all zeros.
+        Ainv = ((one(T) ./ S) .* F.V')' * F.U'
+        return Ainv, S[1] > 0 ? S[end]/S[1] : zero(T)
+    end
+    n = size(At, 1)
+    normA = opnorm(At, 1)
+    F = lu(At; check=false)
+    (normA > 0 && issuccess(F)) || return zeros(T, n, n), zero(T)
+    Ainv = inv(F)
+    return Ainv, inv(normA * opnorm(Ainv, 1))
+end
+
 """Finds a smaller region in which any root must be.
 
 Parameters
@@ -709,22 +736,10 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
     a0, b0 = linearCheck1(totalErrs, A, consts, eps(T))
     a_orig = a0
     b_orig = b0
-    F = svd(A')
-    # LAPACK has no Float16 SVD: LinearAlgebra computes it in Float32 and returns Float32 factors.
-    # Bring them back to T, so everything after this stays in the solve's type. For Float64 (and
-    # Double64, via GenericLinearAlgebra) the factors are already in T and nothing is copied.
-    S = asType(T, F.S)
-    # Ainv = V * diag(1/S) * U'. Built directly instead of through a chain of adjoints and
-    # broadcasts, each of which allocated a dim x dim temporary.
-    # Kept as the original chain of matrix products: on dim x dim with dim <= 4 this is not hot,
-    # and hand-rolling the sums changes the last bit of the result relative to BLAS.
-    Ainv = ((one(T) ./ S) .* asType(T, F.V)')' * (asType(T, F.U)')
+    Ainv, invCondNum = inverseAndInvCond(A')
     center = -Ainv * consts
     absAinv = abs.(Ainv)
-    # Test the reciprocal condition number rather than the condition number itself, so that
-    # a singular A gives 0 instead of a divide by zero. S[1] == 0 means A is all zeros.
-    invCondNum = S[1] > 0 ? S[end]/S[1] : zero(T)
-    wellConditioned = S[1] > 0 && invCondNum > minInvCondNum(T)
+    wellConditioned = invCondNum > minInvCondNum(T)
     machEps = eps(T)
     # Add this width to the new intervals we find to avoid rounding error throwing out roots.
     # Solving with Ainv below loses about condNum digits, so the interval it produces has to be
