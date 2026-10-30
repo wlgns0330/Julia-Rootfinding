@@ -277,6 +277,51 @@ function reduceSolvedDim(Ms, errors, trackedInterval, dim)
 end
 
 """
+`o + c*x`, exactly as written for every type but Double64.
+
+For Double64 it is the same sum with cheaper double-double arithmetic: the high parts of `c*x` come
+from one FMA, and `o` is added with a single two-sum on the high parts and the low parts added plainly,
+rather than DoubleFloats' fully renormalized product and sum. The result is good to about 2^-104 of
+`|o| + |c*x|` instead of 2^-106 -- within eps(Double64), on which the transformation's error bound
+(getTransformationError) is already based. This is the inner loop of every transform; with
+DoubleFloats' operations it was the largest part of a Double64 solve.
+"""
+@inline addProduct(o, c, x) = o + c * x
+@inline function addProduct(o::Double64, c::Double64, x::Double64)
+    p = c.hi * x.hi
+    pe = fma(c.hi, x.hi, -p) + (c.hi * x.lo + c.lo * x.hi)
+    s = o.hi + p
+    v = s - o.hi
+    e = ((o.hi - (s - v)) + (p - v)) + (o.lo + pe)
+    h = s + e
+    return Double64(h, e - (h - s))
+end
+
+"""`a + b`, exactly as written for every type but Double64, which adds as in [`addProduct`](@ref)."""
+@inline addSum(a, b) = a + b
+@inline function addSum(a::Double64, b::Double64)
+    s = a.hi + b.hi
+    v = s - a.hi
+    e = ((a.hi - (s - v)) + (b.hi - v)) + (a.lo + b.lo)
+    h = s + e
+    return Double64(h, e - (h - s))
+end
+
+"""
+`out[:, k, :] .+= c .* x[:, j, :]` for 3-D arrays, with the sum done by [`addProduct`](@ref) for Double64.
+
+The Double64 method indexes the arrays directly rather than through views, which left a double-double
+fused add costing twice what it does in a plain loop.
+"""
+addScaled!(out, k, c, x, j) = (@views out[:, k, :] .+= c .* x[:, j, :])
+function addScaled!(out::AbstractArray{Double64,3}, k, c::Double64, x::AbstractArray{Double64,3}, j)
+    @inbounds for b in axes(out, 3), a in axes(out, 1)
+        out[a, k, b] = addProduct(out[a, k, b], c, x[a, j, b])
+    end
+    return out
+end
+
+"""
 Does the 1d coeff array case for transformChebInPlace1D
 """
 function transformChebInPlace1D1D(coeffs,alpha,beta)
@@ -297,37 +342,37 @@ function transformChebInPlace1D1D(coeffs,alpha,beta)
     #The second column of C. Note that T_1(alpha*x + beta) = alpha*T_1(x) + beta*T_0(x).
     arr2[1] = beta
     arr2[2] = alpha
-    transformedCoeffs[1] += beta * coeffs[2] # arr2[0] * coeffs[1] (matrix muliplication)
-    transformedCoeffs[2] += alpha * coeffs[2] # arr2[1] * coeffs[1] (matrix multiplication)
+    transformedCoeffs[1] = addProduct(transformedCoeffs[1], beta, coeffs[2]) # arr2[0] * coeffs[1] (matrix muliplication)
+    transformedCoeffs[2] = addProduct(transformedCoeffs[2], alpha, coeffs[2]) # arr2[1] * coeffs[1] (matrix multiplication)
     maxRow = 2
     for col in 3:last_dim_length # For each column, calculate each entry and do matrix mult
         thisCoeff = coeffs[col] # the row of coeffs corresponding to the column col of C (for matrix mult)
         # The first entry
-        arr3[1] = -arr1[1] + alpha*arr2[2] + 2*beta*arr2[1]
-        transformedCoeffs[1] += thisCoeff * arr3[1]
+        arr3[1] = addProduct(addProduct(-arr1[1], alpha, arr2[2]), 2*beta, arr2[1])
+        transformedCoeffs[1] = addProduct(transformedCoeffs[1], thisCoeff, arr3[1])
         # The second entry
         if maxRow > 2
-            arr3[2] = -arr1[2] + alpha*(2*arr2[1] + arr2[3]) + 2*beta*arr2[2]
-            transformedCoeffs[2] += thisCoeff * arr3[2]
+            arr3[2] = addProduct(addProduct(-arr1[2], alpha, addSum(2*arr2[1], arr2[3])), 2*beta, arr2[2])
+            transformedCoeffs[2] = addProduct(transformedCoeffs[2], thisCoeff, arr3[2])
         end
 
         # All middle entries
         for i in 3:maxRow-1
-            arr3[i] = -arr1[i] + alpha*(arr2[i-1] + arr2[i+1]) + 2*beta*arr2[i]
-            transformedCoeffs[i] += thisCoeff * arr3[i]
+            arr3[i] = addProduct(addProduct(-arr1[i], alpha, addSum(arr2[i-1], arr2[i+1])), 2*beta, arr2[i])
+            transformedCoeffs[i] = addProduct(transformedCoeffs[i], thisCoeff, arr3[i])
         end
 
         # The second to last entry
         i = maxRow
-        arr3[i] = -arr1[i] + (i == 2 ? 2 : 1)*alpha*(arr2[i-1]) + 2*beta*arr2[i]
-        transformedCoeffs[i] += thisCoeff * arr3[i]
+        arr3[i] = addProduct(addProduct(-arr1[i], (i == 2 ? 2 : 1)*alpha, arr2[i-1]), 2*beta, arr2[i])
+        transformedCoeffs[i] = addProduct(transformedCoeffs[i], thisCoeff, arr3[i])
         #The last entry
         finalVal = alpha*arr2[i]
         # This final entry is typically very small. If it is essentially machine epsilon,
         # zero it out to save calculations.
         if abs(finalVal) > eps(T) #TODO: Justify this val!
             arr3[maxRow+1] = finalVal
-            transformedCoeffs[maxRow+1] += thisCoeff * finalVal
+            transformedCoeffs[maxRow+1] = addProduct(transformedCoeffs[maxRow+1], thisCoeff, finalVal)
             maxRow += 1 # Next column will have one more entry than the current column.
         end
 
@@ -400,37 +445,37 @@ function transformChebInPlace1D(coeffs,alpha,beta,workdim=ndims(coeffs))
     #The second column of C. Note that T_1(alpha*x + beta) = alpha*T_1(x) + beta*T_0(x).
     arr2[1] = beta
     arr2[2] = alpha
-    @views out3[:,1,:] .+= beta .* in3[:,2,:] # arr2[0] * coeffs[1]
-    @views out3[:,2,:] .+= alpha .* in3[:,2,:] # arr2[1] * coeffs[1]
+    addScaled!(out3, 1, beta, in3, 2) # arr2[0] * coeffs[1]
+    addScaled!(out3, 2, alpha, in3, 2) # arr2[1] * coeffs[1]
     maxRow = 2
     for col in 2:last_dim_length-1 # For each column, calculate each entry and do matrix mult
-        thisCoeff = @view in3[:,col+1,:] # the row of coeffs corresponding to column col of C
+        # in3[:,col+1,:] is the row of coeffs corresponding to column col of C
         # The first entry
-        arr3[1] = -arr1[1] + alpha*arr2[2] + 2*beta*arr2[1]
-        @views out3[:,1,:] .+= arr3[1] .* thisCoeff
+        arr3[1] = addProduct(addProduct(-arr1[1], alpha, arr2[2]), 2*beta, arr2[1])
+        addScaled!(out3, 1, arr3[1], in3, col+1)
         # The second entry
         if maxRow > 2
-            arr3[2] = -arr1[2] + alpha*(2*arr2[1] + arr2[3]) + 2*beta*arr2[2]
-            @views out3[:,2,:] .+= arr3[2] .* thisCoeff
+            arr3[2] = addProduct(addProduct(-arr1[2], alpha, addSum(2*arr2[1], arr2[3])), 2*beta, arr2[2])
+            addScaled!(out3, 2, arr3[2], in3, col+1)
         end
 
         # All middle entries
         for i in 3:maxRow-1
-            arr3[i] = -arr1[i] + alpha*(arr2[i-1] + arr2[i+1]) + 2*beta*arr2[i]
-            @views out3[:,i,:] .+= arr3[i] .* thisCoeff
+            arr3[i] = addProduct(addProduct(-arr1[i], alpha, addSum(arr2[i-1], arr2[i+1])), 2*beta, arr2[i])
+            addScaled!(out3, i, arr3[i], in3, col+1)
         end
 
         # The second to last entry
         i = maxRow
-        arr3[i] = -arr1[i] + (i == 2 ? 2 : 1)*alpha*(arr2[i-1]) + 2*beta*arr2[i]
-        @views out3[:,i,:] .+= arr3[i] .* thisCoeff
+        arr3[i] = addProduct(addProduct(-arr1[i], (i == 2 ? 2 : 1)*alpha, arr2[i-1]), 2*beta, arr2[i])
+        addScaled!(out3, i, arr3[i], in3, col+1)
         #The last entry
         finalVal = alpha*arr2[i]
         # This final entry is typically very small. If it is essentially machine epsilon,
         # zero it out to save calculations.
         if abs(finalVal) > eps(T) #TODO: Justify this val!
             arr3[maxRow+1] = finalVal
-            @views out3[:,maxRow+1,:] .+= finalVal .* thisCoeff
+            addScaled!(out3, maxRow+1, finalVal, in3, col+1)
             maxRow += 1 # Next column will have one more entry than the current column.
         end
 
@@ -506,8 +551,26 @@ error : float
 function getTransformationError(M,dim)
 
     machEps = eps(eltype(M))
-    error = size(M, ndims(M) - dim + 1) * machEps * sum(abs, M)
+    error = size(M, ndims(M) - dim + 1) * machEps * absSumBound(M)
     return error #TODO: Figure out a more rigurous bound!
+end
+
+"""
+An upper bound on `sum(abs, M)` for an error bound: `sum(abs, M)` itself for every type but Double64.
+
+A bound only needs Float64's precision. For Double64 the high parts are summed in Float64 and rounded up
+by the summation's own error and the dropped low parts (each under 2^-53 of its high part), instead of
+summing in double-double, which was over a quarter of a Double64 transform. Only for a sum used as a
+magnitude: subtracting terms from it, as the constant term check does, would lose the low bits Double64
+is there to keep.
+"""
+absSumBound(M) = sum(abs, M)
+function absSumBound(M::AbstractArray{Double64})
+    s = 0.0
+    @inbounds for x in M
+        s += abs(x.hi)
+    end
+    return Double64(s * (1 + (length(M) + 2) * eps(Float64)))
 end
 
 """Transforms an entire Chebyshev coefficient matrix using the transformation xHat = alpha*x + beta.

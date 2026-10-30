@@ -182,6 +182,45 @@ function replayTransforms(topInterval::Matrix{T}, transforms::Vector{Matrix{T}})
     return interval, err
 end
 
+"""
+Replays the transforms in Double64, returning an error that widens the interval instead of correcting it.
+
+The generic method's error-free product and sum are exact only in an IEEE type. In Double64 they cost
+dozens of double-double operations each and compute a correction below what Double64 can hold, and they
+were a quarter of a Double64 solve. Here the replay is plain Double64 arithmetic, a bound on its
+rounding is carried along, and the error returned is that bound with the sign that moves each end of the
+interval outward -- about 1e-30 of the interval's magnitude, far below the width of any box the solver
+returns, and never inward of the true interval.
+"""
+function replayTransforms(topInterval::Matrix{Double64}, transforms::Vector{Matrix{Double64}})
+    n = Int(length(topInterval) / 2)
+    interval = copy(topInterval)
+    bound = zeros(Double64, n)
+    u = 2 * eps(Double64)   # per operation, with room for double-double rounding
+    @inbounds for t in length(transforms):-1:1
+        transform = transforms[t]
+        for d in 1:n
+            alpha = transform[d, 1]
+            beta = transform[d, 2]
+            # alpha is half the width of a subinterval, so it is never negative.
+            largest = zero(Double64)
+            for c in 1:2
+                x = interval[c, d] * alpha
+                y = x + beta
+                interval[c, d] = y
+                largest = max(largest, abs(x) + abs(y))
+            end
+            bound[d] = alpha * bound[d] + u * largest
+        end
+    end
+    err = Matrix{Double64}(undef, 2, n)
+    @inbounds for d in 1:n
+        err[1, d] = -bound[d]
+        err[2, d] = bound[d]
+    end
+    return interval, err
+end
+
 """Finds the point that should be reported as the root (midpoint of the final step interval).
 
 Returns

@@ -4,6 +4,9 @@ using YRoots: SolverOptions, TrackedInterval, TransformChebInPlaceND, boundingIn
     solvePolyRecursive, transformCheb, transformChebInPlace1D, transformChebToInterval, trimMs,
     zoomInOnIntervalIter
 using Test
+using DoubleFloats: Double64
+import YRoots
+using Random
 
 # ---------------------------------------------------------------------------------
 # A non-degenerate 4-D fixture with known isolated roots.
@@ -88,6 +91,7 @@ function test_all_ChebyshevSubdivisionSolver()
         test_getTransformationError()
         test_transformCheb()
         test_transformChebToInterval()
+        test_double64TransformsStayWithinTheirBound()
         test_getSubdivisionDims()
         test_getSubdivisionDims_keepsADimensionThatCanStillBeSplit()
         test_getInverseOrder()
@@ -12124,5 +12128,41 @@ function test_getSubdivisionDims_keepsADimensionThatCanStillBeSplit()
         interval[2, 4] += 1e-9
         tracked = TrackedInterval(interval)
         @test getSubdivisionDims(Ms, tracked, 7) == [[4], [4], [4], [4]]
+    end
+end
+
+function test_double64TransformsStayWithinTheirBound()
+    @testset "Double64 transforms and replays stay within their error bounds" begin
+        # Double64 transforms use cheaper double-double sums than DoubleFloats' own. Each result
+        # must still agree with a 256-bit transform of the same coefficients to within the error
+        # bound the transform reports.
+        Random.seed!(7)
+        for _ in 1:20
+            n1, n2 = rand(3:25), rand(3:25)
+            M = Double64.(randn(n1, n2)) .* Double64.(exp.(-0.2 .* (1:n1) .- 0.2 .* (1:n2)'))
+            a = 0.01 .+ 0.5 .* rand(2); b = (rand(2) .- 0.5) .* (1 .- a)
+            Md, err = transformCheb(M, Double64.(a), Double64.(b), Double64(0), false)
+            Mb = setprecision(256) do
+                transformCheb(BigFloat.(M), BigFloat.(Double64.(a)), BigFloat.(Double64.(b)), big(0), false)[1]
+            end
+            k1, k2 = min.(size(Md), size(Mb))
+            # Coefficients the Double64 transform dropped as below rounding are compared against zero.
+            diff = maximum(abs.(big.(Md[1:k1, 1:k2]) .- Mb[1:k1, 1:k2]))
+            @test diff <= err
+        end
+
+        # Replaying transforms in Double64 widens the interval to cover its own rounding.
+        top = Double64[-1 -1; 1 1]
+        transforms = [Double64[0.3 0.1; 0.25 -0.2], Double64[1e-3 0.4; 2e-3 -0.5], Double64[0.5 0.01; 0.5 0.02]]
+        iv, err = YRoots.replayTransforms(top, transforms)
+        exact = setprecision(256) do
+            x = BigFloat.(top)
+            for t in reverse(transforms), d in 1:2, c in 1:2
+                x[c, d] = BigFloat(t[d, 1]) * x[c, d] + BigFloat(t[d, 2])
+            end
+            x
+        end
+        @test all(big.(iv[1, :] .+ err[1, :]) .<= exact[1, :])
+        @test all(big.(iv[2, :] .+ err[2, :]) .>= exact[2, :])
     end
 end
