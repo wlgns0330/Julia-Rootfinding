@@ -710,6 +710,21 @@ function inverseAndInvCond(At::AbstractMatrix{T}) where {T}
     return Ainv, inv(sqrt(opnorm(At, 1) * opnorm(At, Inf) * opnorm(Ainv, 1) * opnorm(Ainv, Inf)))
 end
 
+"""
+A power of two near `|x|`, for scaling rows and columns exactly: `2^floor(log2(|x|))`, exactly as written
+for every type but Double64.
+
+For Double64 it is 2 to the exponent of the high part, which is within a factor of 2 of that and free:
+DoubleFloats' log2 is a full double-double logarithm, and these two lines were 7% of a Double64 solve.
+Any power of two serves -- it only balances the linear system, and scaling by one is exact.
+"""
+powerOfTwoNear(x::T) where {T} = T(2)^Int(floor(log2(abs(x))))
+powerOfTwoNear(x::Double64) = Double64(ldexp(1.0, exponent(x.hi)))
+
+"""The reciprocal of [`powerOfTwoNear`](@ref): `2^-floor(log2(|x|))` as written for every type but Double64."""
+inversePowerOfTwoNear(x::T) where {T} = T(2)^(-floor(log2(abs(x))))
+inversePowerOfTwoNear(x::Double64) = Double64(ldexp(1.0, -exponent(x.hi)))
+
 """Finds a smaller region in which any root must be.
 
 Parameters
@@ -772,7 +787,7 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
             scaleVal = max(scaleVal, abs(A[r, i]))
         end
         if scaleVal > 0
-            s = T(2)^Int(floor(log2(abs(scaleVal))))
+            s = powerOfTwoNear(scaleVal)
             for r in 1:dim
                 A[r, i] /= s
             end
@@ -790,7 +805,7 @@ function boundingIntervalLinearSystem(Ms, errors, finalStep)
             scaleVal = max(scaleVal, abs(A[i, c]))
         end
         if scaleVal > 0
-            s = T(2)^(-floor(log2(abs(scaleVal))))
+            s = inversePowerOfTwoNear(scaleVal)
             colScaler[i] = s
             for c in 1:dim
                 totalErrs[c] += abs(A[i, c]) * (s - 1)
