@@ -683,8 +683,15 @@ never used, since 0 is below every [`minInvCondNum`](@ref).
 
 For the LAPACK types (Float32 and Float64) both come from the SVD, exactly as before. For any other
 type the SVD is GenericLinearAlgebra's, which on a 2 x 2 Double64 matrix was over a quarter of a whole
-solve, so the inverse comes from an LU factorization instead and the reciprocal condition number from
-1-norms, which is within a factor of the dimension of the 2-norm one.
+solve, and 7 to 10 times the cost of the Householder QR factorization used instead. QR's inverse is as
+accurate as the SVD's, about the condition number times eps(T), and like the SVD it is backward stable
+for every size of matrix; LU with partial pivoting can lose up to 2^(n-1) more on adversarial matrices.
+
+The solver pads by the 2-norm condition number, which without the SVD is bounded from above by
+sqrt(kappa_1 * kappa_inf), since ||A||_2 <= sqrt(||A||_1 ||A||_inf). The bound is never below the true
+value and at most n times above it, usually within 3x for n <= 10, so the padding and the
+well-conditioned cutoff are never less safe than the SVD's. kappa_1 alone is not a bound: it came out as
+low as 0.56 of kappa_2 on random 10 x 10 matrices.
 """
 function inverseAndInvCond(At::AbstractMatrix{T}) where {T}
     if T <: Union{Float32, Float64}
@@ -697,11 +704,10 @@ function inverseAndInvCond(At::AbstractMatrix{T}) where {T}
         return Ainv, S[1] > 0 ? S[end]/S[1] : zero(T)
     end
     n = size(At, 1)
-    normA = opnorm(At, 1)
-    F = lu(At; check=false)
-    (normA > 0 && issuccess(F)) || return zeros(T, n, n), zero(T)
-    Ainv = inv(F)
-    return Ainv, inv(normA * opnorm(Ainv, 1))
+    F = qr(At)
+    any(iszero, diag(F.R)) && return zeros(T, n, n), zero(T)
+    Ainv = F \ Matrix{T}(I, n, n)
+    return Ainv, inv(sqrt(opnorm(At, 1) * opnorm(At, Inf) * opnorm(Ainv, 1) * opnorm(Ainv, Inf)))
 end
 
 """Finds a smaller region in which any root must be.
