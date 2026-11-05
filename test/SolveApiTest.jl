@@ -62,7 +62,6 @@ function test_all_SolveApi()
         test_warnDuplicateRoots_listsEachSetOnItsOwnLine()
         test_solve_minBoundingIntervalSizeFollowsType()
         test_solve_float32SingularLinearPartSolvesDirectly()
-        test_solve_float16SimpleRootsAreNotBelowResolution()
         test_solve_highPrecisionIsDouble64()
     end
 end
@@ -445,11 +444,6 @@ function test_solve_validatesInput()
         @test_throws ArgumentError YRoots.solve([f, 3.0], [-1.0, -1.0], [1.0, 1.0])         # not callable
         @test_throws ArgumentError YRoots.solve([f, YRoots.MultiPower(zeros(2, 2, 2) .+ 1)],
                                                 [-1.0, -1.0], [1.0, 1.0])                   # 3-D polynomial
-        # Only the caller's bounds are checked: solve checks them once and the solver solves sub-boxes by
-        # calling itself, not solve. When it went through solve, a Float16 sub-box whose two bounds had
-        # rounded to the same value (0.4766 and 0.4766, Chebfun2 case 9.2) was rejected with this error.
-        @test (YRoots.solve([(x, y) -> x^2 + y^2 - 0.49^2, (x, y) -> (x - 0.1) * (x * y - 0.2)],
-                            [-1.0, -1.0], [1.0, 1.0]; roundoff=11); true)
         # The bounds that are accepted: a number for every dimension, integers, and a tuple of functions.
         for (funcs, a, b) in (([f, g], -1, 1), ([f, g], [-1, -1], [1, 1]), ((f, g), -1.0, 1.0))
             roots = YRoots.solve(funcs, a, b)
@@ -476,16 +470,16 @@ end
 
 function test_solve_lowPrecisionPolynomialDoesNotRunAway()
     @testset "low-precision polynomial input does not subdivide without end" begin
-        # Regression test: in Float16 these polynomials are swamped by their rounding error along their
-        # zero curves, and carrying them onto smaller boxes keeps the error while shrinking the
-        # polynomials, so solve cut the interval up for minutes. It now returns such a box whole; the
-        # answer is coarse, but every root must lie in a returned box.
+        # Regression test: in low precision these polynomials are swamped by their rounding error along
+        # their zero curves, and carrying them onto smaller boxes keeps the error while shrinking the
+        # polynomials, so solve cut the interval up for minutes (in Float16, since removed). It returns
+        # such a box whole; the answer can be coarse, but every root must lie in a returned box.
         parabola = zeros(3, 2); parabola[1, 2] = 1; parabola[3, 1] = -1          # y - x^2
         cubic = zeros(4, 2); cubic[1, 2] = 1; cubic[4, 1] = -1; cubic[2, 1] = 0.5  # y - x^3 + x/2
         r = (1 - sqrt(3)) / 2
         expected = [[0.0, 0.0], [r, r^2]]
         roots, boxes = YRoots.solve([YRoots.MultiPower(parabola), YRoots.MultiPower(cubic)], [-1.0, -1.0], [1.0, 1.0];
-                                    roundoff=11, returnBoundingBoxes=true)
+                                    roundoff=24, returnBoundingBoxes=true)
         @test length(roots) == length(boxes)
         @test all(any(all(box[1, :] .<= e .<= box[2, :]) for box in boxes) for e in expected)
     end
@@ -601,7 +595,6 @@ function test_solve_minBoundingIntervalSizeFollowsType()
         @test YRoots.defaultMinBoundingIntervalSize(Float64) == 1e-5
         @test YRoots.defaultMinBoundingIntervalSize(Double64) == 1e-5
         @test YRoots.defaultMinBoundingIntervalSize(Float32) ≈ cbrt(eps(Float32))
-        @test YRoots.defaultMinBoundingIntervalSize(Float16) == 8*eps(Float16)
 
         # Float32 boxes are wider than 1e-5, so the old default solved each again. With the
         # Float32 default the roots are still found, to Float32 accuracy, and nothing is re-solved.
@@ -610,8 +603,6 @@ function test_solve_minBoundingIntervalSizeFollowsType()
         out = sortedRoots(YRoots.solve(fs, -1.0, 1.0; roundoff=24))
         @test length(out) == length(ref) == 5
         @test all(isapprox(p, q, atol=1e-5) for (p, q) in zip(out, ref))
-        # Float16 keeps its own floor; a looser one let wide boxes through as extra roots.
-        @test length(YRoots.solve(fs, -1.0, 1.0; roundoff=11)) == 5
     end
 end
 
@@ -631,23 +622,14 @@ function test_solve_float32SingularLinearPartSolvesDirectly()
     end
 end
 
-function test_solve_float16SimpleRootsAreNotBelowResolution()
-    @testset "Float16 simple roots are not stopped as below resolution" begin
-        @test YRoots.maxResolutionVariation(Float64) == 100
-        @test YRoots.maxResolutionVariation(Float32) == 100
-        @test YRoots.maxResolutionVariation(Float16) == 10
-        # On half of [-1, 1], sin(10x) in Float16 varies by only 45 to 90 times its error. Under
-        # the old cutoff of 100 both halves stopped there and the solver returned [-1, 1] as one
-        # box, which solve then had to cut and approximate again.
-        c, e = YRoots.chebApproximate(x -> sin(10x), [-1.0], [1.0])
-        roots = YRoots.solveChebyshevSubdivision([Float16.(c)], Float16[YRoots.convertedApproxError(Float16, c, e)])
-        @test length(roots) == 7
-        @test all(any(abs(Float64(r[1]) - k*pi/10) < 1e-2 for k in -3:3) for r in roots)
-    end
-end
-
 function test_solve_highPrecisionIsDouble64()
     @testset "roundoff above 53 solves in Double64" begin
+        # Float32 is the least precise type; Float16 was removed.
+        @test YRoots.solveType(1) == Float32
+        @test YRoots.solveType(11) == Float32
+        @test YRoots.solveType(24) == Float32
+        fs = [(x, y) -> sin(5x) - y, (x, y) -> x^2 + y^2 - 0.5]
+        @test YRoots.solve(fs, -1.0, 1.0; roundoff=11) == YRoots.solve(fs, -1.0, 1.0; roundoff=24)
         @test YRoots.solveType(53) == Float64
         @test YRoots.solveType(54) == Double64
         @test YRoots.solveType(106) == Double64

@@ -67,20 +67,7 @@ end
 
 
 """
-The default `maxVariation` of [`isBelowResolution`](@ref) for polynomials of type `T`: 100, or 10 for Float16.
-
-Where every function touches zero the ratio of a polynomial's variation to its error stalls -- at
-2.7 to 5 for (x-.2)^2 = (y+.1)^2 = 0, but between 10 and 100 at the double root of Chebfun2 case 6.1 in
-Float64, which subdivides without end below 100. At a simple root the ratio instead halves with the box,
-so a cutoff of `c` stops a box about `c` times wider than the type can resolve. In Float64 and Float32
-that is far below any box solve keeps. In Float16 it is not: a polynomial varies by only 45 to 90 times
-its error on half of [-1, 1], so both halves stopped there and came back as single boxes, and solve had
-to cut and approximate them again, up to 8x slower than Float64.
-"""
-maxResolutionVariation(::Type{T}) where {T} = T === Float16 ? 10 : 100
-
-"""
-    isBelowResolution(Ms, errors, maxVariation=maxResolutionVariation(eltype(Ms[1])))
+    isBelowResolution(Ms, errors, maxVariation=100)
 
 Whether every polynomial is within a few times its error of a constant on the interval.
 
@@ -104,15 +91,16 @@ Ms : list of arrays
 errors : array
     An upper bound on the error of each Chebyshev approximation
 maxVariation : number
-    How many times its error each polynomial may vary by and still count as unresolved. Defaults
-    to maxResolutionVariation of the coefficients' type.
+    How many times its error each polynomial may vary by and still count as unresolved. Where every
+    function touches zero this ratio stalls -- at 2.7 to 5 for (x-.2)^2 = (y+.1)^2 = 0, but between 10
+    and 100 at the double root of Chebfun2 case 6.1, which subdivides without end under a cutoff of 10.
 
 Returns
 -------
 bool
     True if every polynomial varies, but by no more than maxVariation times its error.
 """
-function isBelowResolution(Ms, errors, maxVariation=maxResolutionVariation(eltype(Ms[1])))
+function isBelowResolution(Ms, errors, maxVariation=100)
     for (M, e) in zip(Ms, errors)
         variation = sum(abs, M) - abs(M[1])
         if variation <= 0 || variation > maxVariation*e
@@ -652,21 +640,9 @@ function findVertices(A,b,errors)
 end
 
 """
-The type the linear bounding step runs in for a solve in type T: T itself, except Float32 for Float16.
-
-That step scales each row and column of a dim x dim matrix by a power of two to bring its entries to
-about 1, and the factor for a column of entries near 1e-7 is 2^24, past Float16's largest value of 65504.
-It overflowed to Inf, the matrix filled with NaN, and LAPACK rejected it. LAPACK has no Float16 SVD
-anyway, so the decomposition was already done in Float32.
-"""
-linearSystemType(::Type{T}) where {T} = T === Float16 ? Float32 : T
-
-"""
 The smallest reciprocal condition number at which the linear system in type `T` is solved directly.
 
-`1e-10` for Float64, scaled with `eps(T)`: about `5.4e-5` for Float32, which a Float16 solve's linear
-system also runs in (see linearSystemType). An exactly
-singular matrix computed in `T` comes out with a reciprocal condition number of a few `eps(T)` -- 7e-8 in
+`1e-10` for Float64, scaled with `eps(T)`: about `5.4e-5` for Float32. An exactly singular matrix computed in `T` comes out with a reciprocal condition number of a few `eps(T)` -- 7e-8 in
 Float32 -- so a fixed `1e-10` passed singular systems in Float32 as well conditioned. The solver then
 padded the solve by more than the interval, concluded it could not shrink even if subdivided, and
 returned the whole interval as one root: a sphere cut by two planes came back as a single box covering
@@ -748,7 +724,7 @@ throwout :
     Whether we should throw out the interval entirely
 """
 function boundingIntervalLinearSystem(Ms, errors, finalStep)
-    T = linearSystemType(eltype(Ms[1]))
+    T = eltype(Ms[1])
     if finalStep
         errors = zeros(T, size(errors))
     end

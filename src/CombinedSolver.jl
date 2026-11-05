@@ -76,8 +76,12 @@ function validateSolveInput(funcs, a, b)
 end
 
 """
-The number type `solve` runs in for `roundoff` bits of precision: Float16 for 11 or fewer, Float32 for 24
-or fewer, Float64 for 53 or fewer, and Double64 for 106 or fewer.
+The number type `solve` runs in for `roundoff` bits of precision: Float32 for 24 or fewer, Float64 for 53
+or fewer, and Double64 for 106 or fewer.
+
+Float32 is the least precise: fewer bits than its 24 are solved in it rather than in Float16, which was
+removed. Float16's range ends at 65504 and its epsilon is 1e-3, which the solver's scaling overflowed and
+its tolerances needed special cases for, and its roots were only good to about 1e-4.
 
 Above 53 bits this used BigFloat at `roundoff` bits. Double64 (DoubleFloats.jl) carries 106 bits as an
 unevaluated sum of two Float64s, so its arithmetic is a handful of Float64 operations rather than calls
@@ -88,7 +92,7 @@ refused rather than quietly solved at fewer.
 function solveType(roundoff)
     roundoff <= 106 || throw(ArgumentError(
         "roundoff = $roundoff is above the 106 bits of the most precise type solve supports (Double64)"))
-    return roundoff <= 11 ? Float16 : roundoff <= 24 ? Float32 : roundoff <= 53 ? Float64 : Double64
+    return roundoff <= 24 ? Float32 : roundoff <= 53 ? Float64 : Double64
 end
 
 """
@@ -100,13 +104,8 @@ the type, so a `Double64` solve of one cannot tighten its boxes past a `Float64`
 `Float32` uses `eps(Float32)^(1/3)`, about `4.9e-3`, the same cube root of machine epsilon that `1e-5` is
 for `Float64`. Its boxes come out `1e-6` to `2e-4` wide, so under `1e-5` nearly every one was solved again,
 which made a Float32 solve up to 8x slower than a Float64 one for accuracy it was never asked for.
-
-`Float16` uses `8*eps(Float16)`, about `7.8e-3`: the floor the re-solve already applies, since a box only a
-few rounding steps wide cannot be shrunk. Its boxes are only a few steps wide to begin with, and the
-re-solve is what splits or discards the wider ones; at `eps(Float16)^(1/3)` (about `0.1`) or even `0.03`
-they were kept, and a system with 5 roots came back with 7.
 """
-defaultMinBoundingIntervalSize(T) = T === Float16 ? 8*eps(Float16) : T === Float32 ? eps(Float32)^(1/3) : 1e-5
+defaultMinBoundingIntervalSize(T) = T === Float32 ? eps(Float32)^(1/3) : 1e-5
 
 """
     solve(funcs, a, b; verbose=false, returnBoundingBoxes=false, exact=false,
@@ -144,10 +143,10 @@ search recurses until it zeros in on each root. One point -- and optionally a bo
   absolute while the interval in question lies within `[-1, 1]`, and relative otherwise:
   for an interval with an endpoint of magnitude greater than 1, it is multiplied by that
   magnitude in that dimension. Defaults to a value for the floating-point type `roundoff`
-  selects: `1e-5` for `Float64` and `Double64`, `eps(Float32)^(1/3)` (about `4.9e-3`) for
-  `Float32` and `8*eps(Float16)` (about `7.8e-3`) for `Float16`.
+  selects: `1e-5` for `Float64` and `Double64`, and `eps(Float32)^(1/3)` (about `4.9e-3`) for
+  `Float32`.
 - `roundoff::Int = 53`: Bits of precision to solve at. `53` (the default, and anything from 25
-  to 53) solves in `Float64`, `<= 24` in `Float32`, `<= 11` in `Float16`, and 54 to 106 in
+  to 53) solves in `Float64`, `<= 24` in `Float32`, and 54 to 106 in
   `Double64` (106 bits, from DoubleFloats.jl). Above 106 throws an `ArgumentError`. Every
   precision runs the same solver. A callable is always approximated in `Float64`, so a higher
   precision can only improve the accuracy of polynomial input ([`MultiPower`](@ref) /
@@ -230,7 +229,7 @@ coefficients), so that it cannot be told apart from a constant anywhere on the r
 
 Carried onto a smaller region, a polynomial varies less while its error bound stays the same, so a
 swamped polynomial stays swamped on every part of the region, and cutting the region up cannot locate
-its roots. This is what happens to polynomial input in Float32 and Float16 near its zero curves.
+its roots. This is what happens to polynomial input in Float32 near its zero curves.
 """
 swampedByError(coeffs, err) = err >= sum(abs, coeffs) - abs(coeffs[1])
 
@@ -385,9 +384,9 @@ function solveSystem(funcs,a,b; verbose, returnBoundingBoxes, exact, minBounding
         newBox = transformPoints(box.finalInterval',a,b)
         newA, newB = newBox[:,1],newBox[:,2]
 
-        # A box only a few rounding steps of T wide cannot be shrunk by solving it again, and in Float16 the
-        # default 1e-5 is below one step (2.4e-4 near 0.3): solving such a box again found nothing and its
-        # root was dropped. The floor of 8 steps is below 1e-5 for Float32 and above, so it changes nothing there.
+        # A box only a few rounding steps of T wide cannot be shrunk by solving it again: solving such a box
+        # again can find nothing and drop its root. The floor of 8 steps is below every type's default, so it
+        # only matters for a minBoundingIntervalSize given smaller than that.
         relMaxSize = max(minBoundingIntervalSize, 8*eps(T)) .* maximum(hcat(abs.(a),abs.(b),fill(1,length(a))),dims=2)
         if all(newB - newA .> relMaxSize)
             #Re-solve this box
