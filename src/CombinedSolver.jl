@@ -75,24 +75,24 @@ function validateSolveInput(funcs, a, b)
     return funcs, a, b
 end
 
+"""The number types `solve` runs in: its `numtype` must be one of these."""
+const SOLVE_TYPES = (Float32, Float64, Double64)
+
 """
-The number type `solve` runs in for `roundoff` bits of precision: Float32 for 24 or fewer, Float64 for 53
-or fewer, and Double64 for 106 or fewer.
+`numtype`, checked to be one of [`SOLVE_TYPES`](@ref); an `ArgumentError` otherwise.
 
-Float32 is the least precise: fewer bits than its 24 are solved in it rather than in Float16, which was
-removed. Float16's range ends at 65504 and its epsilon is 1e-3, which the solver's scaling overflowed and
-its tolerances needed special cases for, and its roots were only good to about 1e-4.
-
-Above 53 bits this used BigFloat at `roundoff` bits. Double64 (DoubleFloats.jl) carries 106 bits as an
+The type used to be chosen from a `roundoff` in bits, which only ever selected one of a few types, so
+the type is now named directly. Float16 was removed: its range ends at 65504 and its epsilon is 1e-3,
+which the solver's scaling overflowed and its tolerances needed special cases for, and its roots were only
+good to about 1e-4. BigFloat was replaced by Double64 (DoubleFloats.jl), which carries 106 bits as an
 unevaluated sum of two Float64s, so its arithmetic is a handful of Float64 operations rather than calls
-into MPFR: on polynomial input it was 13 to 24 times faster than a 128-bit BigFloat solve, and 2.1 to 4.4
-times slower than Float64, with roots within 1e-20 to 1e-32 of a 256-bit solve. More than 106 bits is
-refused rather than quietly solved at fewer.
+into MPFR: on polynomial input it was 13 to 24 times faster than a 128-bit BigFloat solve, with roots
+within 1e-20 to 1e-32 of a 256-bit solve.
 """
-function solveType(roundoff)
-    roundoff <= 106 || throw(ArgumentError(
-        "roundoff = $roundoff is above the 106 bits of the most precise type solve supports (Double64)"))
-    return roundoff <= 24 ? Float32 : roundoff <= 53 ? Float64 : Double64
+function checkSolveType(numtype)
+    numtype in SOLVE_TYPES ||
+        throw(ArgumentError("numtype must be Float32, Float64 or Double64; got $numtype"))
+    return numtype
 end
 
 """
@@ -109,7 +109,7 @@ defaultMinBoundingIntervalSize(T) = T === Float32 ? eps(Float32)^(1/3) : 1e-5
 
 """
     solve(funcs, a, b; verbose=false, returnBoundingBoxes=false, exact=false,
-          minBoundingIntervalSize=nothing, roundoff=53)
+          minBoundingIntervalSize=nothing, numtype=Float64)
 
 Find the roots of a system of functions on the search interval `[a, b]`.
 
@@ -142,15 +142,13 @@ search recurses until it zeros in on each root. One point -- and optionally a bo
   if the functions cannot be evaluated accurately at points close together. The value is
   absolute while the interval in question lies within `[-1, 1]`, and relative otherwise:
   for an interval with an endpoint of magnitude greater than 1, it is multiplied by that
-  magnitude in that dimension. Defaults to a value for the floating-point type `roundoff`
-  selects: `1e-5` for `Float64` and `Double64`, and `eps(Float32)^(1/3)` (about `4.9e-3`) for
-  `Float32`.
-- `roundoff::Int = 53`: Bits of precision to solve at. `53` (the default, and anything from 25
-  to 53) solves in `Float64`, `<= 24` in `Float32`, and 54 to 106 in
-  `Double64` (106 bits, from DoubleFloats.jl). Above 106 throws an `ArgumentError`. Every
-  precision runs the same solver. A callable is always approximated in `Float64`, so a higher
-  precision can only improve the accuracy of polynomial input ([`MultiPower`](@ref) /
-  [`MultiCheb`](@ref)).
+  magnitude in that dimension. Defaults to a value for `numtype`: `1e-5` for `Float64` and
+  `Double64`, and `eps(Float32)^(1/3)` (about `4.9e-3`) for `Float32`.
+- `numtype::Type = Float64`: The number type to solve in: `Float32`, `Float64` or `Double64`
+  (106 bits, from DoubleFloats.jl; YRoots exports it). Any other type throws an
+  `ArgumentError`. Every type runs the same solver. A callable is always approximated in
+  `Float64`, so `Double64` can only improve the accuracy of polynomial input
+  ([`MultiPower`](@ref) / [`MultiCheb`](@ref)).
 
 # Returns
 A vector of roots, each a point in the search interval. With `returnBoundingBoxes = true`,
@@ -184,11 +182,11 @@ julia> solve([M1, M2], [-5.0, -5.0], [5.0, 5.0]);
     subdivision; it will give up at `maxLevel` and report a wide bounding box.
 """
 
-function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=nothing, roundoff=53)
+function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=false, minBoundingIntervalSize=nothing, numtype=Float64)
     funcs, a, b = validateSolveInput(funcs, a, b)
     # Every precision runs the same solver, generic over its number type. It solves sub-boxes by
     # calling itself, so the input above is checked once.
-    T = solveType(roundoff)
+    T = checkSolveType(numtype)
     minBoundingIntervalSize = something(minBoundingIntervalSize, defaultMinBoundingIntervalSize(T))
     # The solves it makes add their sets of possible duplicate roots here, so this call warns about all of them once.
     dupSets = Any[]

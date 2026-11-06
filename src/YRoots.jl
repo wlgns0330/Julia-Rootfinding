@@ -16,7 +16,8 @@ include("ChebyshevSubdivisionSolver.jl")
 include("StructsWithTheirFunctions/Polynomial.jl")
 include("CombinedSolver.jl")
 
-export solve, MultiPower, MultiCheb, eval_MultiPower, eval_MultiCheb
+# Double64 is exported so that `solve(...; numtype=Double64)` needs no `using DoubleFloats`.
+export solve, MultiPower, MultiCheb, eval_MultiPower, eval_MultiCheb, Double64
 
 # Compile the solver at each dimension, once at install, instead of on each session's first solve.
 #

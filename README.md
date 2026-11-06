@@ -95,7 +95,7 @@ Both types also evaluate directly, via `eval_MultiPower` and `eval_MultiCheb`.
 | `returnBoundingBoxes` | `false` | Return `(roots, boundingBoxes)` instead of just the roots. |
 | `exact` | `false` | Run the transformations in higher precision — more accurate, slower. |
 | `minBoundingIntervalSize` | depends on the type | Re-solve on a smaller interval while a root's box exceeds this size. `1e-5` for `Float64` and `Double64`, about `4.9e-3` for `Float32`. |
-| `roundoff` | `53` | Bits of precision. `53` selects `Float64`; `<= 24` `Float32`, `54` to `106` `Double64` (DoubleFloats.jl). Above `106` is an error. |
+| `numtype` | `Float64` | The number type to solve in: `Float32`, `Float64` or `Double64` (106 bits, from DoubleFloats.jl; exported by YRoots). Any other type is an error. |
 
 See the [`solve` reference](https://wlgns0330.github.io/Julia-Rootfinding/solve/) for the
 details.

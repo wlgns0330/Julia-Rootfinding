@@ -62,7 +62,7 @@ function test_all_SolveApi()
         test_warnDuplicateRoots_listsEachSetOnItsOwnLine()
         test_solve_minBoundingIntervalSizeFollowsType()
         test_solve_float32SingularLinearPartSolvesDirectly()
-        test_solve_highPrecisionIsDouble64()
+        test_solve_numtypeSelectsTheType()
     end
 end
 
@@ -386,9 +386,9 @@ function test_solve_oneBoxPerRoot()
         # were 6 roots and 5 boxes and zip(roots, boxes) paired most roots with the wrong box.
         f = (x, y) -> (y - 2x) * (y + 0.5x)
         g = (x, y) -> x * (x^2 + y^2 - 1)
-        for roundoff in (53, 80)
+        for numtype in (Float64, Double64)
             roots, boxes = YRoots.solve([f, g], [-1.0, -1.0], [1.0, 1.0];
-                                        returnBoundingBoxes=true, roundoff=roundoff)
+                                        returnBoundingBoxes=true, numtype=numtype)
             @test length(roots) >= 5
             @test length(boxes) == length(roots)
             @test all(all(box[1, :] .<= root .<= box[2, :]) for (root, box) in zip(roots, boxes))
@@ -454,13 +454,13 @@ end
 
 function test_solve_generalPrecisionKeepsCloseRoots()
     @testset "solve at other precisions keeps close roots" begin
-        # Regression test: above 53 bits of roundoff, solve lost both roots of this pair. The
+        # Regression test: above Float64 (in BigFloat, since replaced by Double64), solve lost both roots of this pair. The
         # approximation is built in Float64, but only rounding at the solve's own precision was
         # allowed for. Two roots this close, well under sqrt(macheps) apart, come back as one point
         # or a pair in one box, as in Float64; either way every root must be found and boxed.
         d = 1e-9
         roots, boxes = YRoots.solve([(x, y) -> (x - y) * (x - y - d), (x, y) -> x + y - 0.5],
-                                    [-1.0, -1.0], [1.0, 1.0]; roundoff=80, returnBoundingBoxes=true)
+                                    [-1.0, -1.0], [1.0, 1.0]; numtype=Double64, returnBoundingBoxes=true)
         expected = [[0.25, 0.25], [0.25 + d / 2, 0.25 - d / 2]]
         @test 1 <= length(roots) <= 2
         @test all(minimum(maximum(abs.(Float64.(r) .- e)) for e in expected) < 1e-8 for r in roots)
@@ -479,7 +479,7 @@ function test_solve_lowPrecisionPolynomialDoesNotRunAway()
         r = (1 - sqrt(3)) / 2
         expected = [[0.0, 0.0], [r, r^2]]
         roots, boxes = YRoots.solve([YRoots.MultiPower(parabola), YRoots.MultiPower(cubic)], [-1.0, -1.0], [1.0, 1.0];
-                                    roundoff=24, returnBoundingBoxes=true)
+                                    numtype=Float32, returnBoundingBoxes=true)
         @test length(roots) == length(boxes)
         @test all(any(all(box[1, :] .<= e .<= box[2, :]) for box in boxes) for e in expected)
     end
@@ -600,7 +600,7 @@ function test_solve_minBoundingIntervalSizeFollowsType()
         # Float32 default the roots are still found, to Float32 accuracy, and nothing is re-solved.
         fs = [(x, y) -> sin(8x)*cos(6y) - 0.2, (x, y) -> x^2 - y - 0.3]
         ref = sortedRoots(YRoots.solve(fs, -1.0, 1.0))
-        out = sortedRoots(YRoots.solve(fs, -1.0, 1.0; roundoff=24))
+        out = sortedRoots(YRoots.solve(fs, -1.0, 1.0; numtype=Float32))
         @test length(out) == length(ref) == 5
         @test all(isapprox(p, q, atol=1e-5) for (p, q) in zip(out, ref))
     end
@@ -622,19 +622,19 @@ function test_solve_float32SingularLinearPartSolvesDirectly()
     end
 end
 
-function test_solve_highPrecisionIsDouble64()
-    @testset "roundoff above 53 solves in Double64" begin
-        # Float32 is the least precise type; Float16 was removed.
-        @test YRoots.solveType(1) == Float32
-        @test YRoots.solveType(11) == Float32
-        @test YRoots.solveType(24) == Float32
+function test_solve_numtypeSelectsTheType()
+    @testset "numtype selects Float32, Float64 or Double64" begin
+        # The type is named directly; anything else, Float16 and BigFloat included, is refused.
         fs = [(x, y) -> sin(5x) - y, (x, y) -> x^2 + y^2 - 0.5]
-        @test YRoots.solve(fs, -1.0, 1.0; roundoff=11) == YRoots.solve(fs, -1.0, 1.0; roundoff=24)
-        @test YRoots.solveType(53) == Float64
-        @test YRoots.solveType(54) == Double64
-        @test YRoots.solveType(106) == Double64
-        @test_throws ArgumentError YRoots.solveType(107)
-        @test_throws ArgumentError YRoots.solve([x -> x - 0.1], -1.0, 1.0; roundoff=128)
+        @test YRoots.solve(fs, -1.0, 1.0) == YRoots.solve(fs, -1.0, 1.0; numtype=Float64)
+        for T in (Float16, BigFloat, Int)
+            @test_throws ArgumentError YRoots.solve(fs, -1.0, 1.0; numtype=T)
+        end
+        # roundoff, which numtype replaces, is no longer a keyword of solve.
+        @test_throws MethodError YRoots.solve(fs, -1.0, 1.0; roundoff=53)
+        # Double64 comes with YRoots, so a caller needs no `using DoubleFloats` for it.
+        @test YRoots.Double64 === Double64
+        @test :Double64 in names(YRoots)
 
         # Two roots 1e-9 apart of a polynomial system. Float64 puts both in one box about 1e-7 wide;
         # Double64 finds each to well past Float64's precision. The roots of these exact coefficients
@@ -643,7 +643,7 @@ function test_solve_highPrecisionIsDouble64()
         f = zeros(3, 3); f[3, 1] = 1; f[2, 2] = -2; f[1, 3] = 1; f[2, 1] = -d; f[1, 2] = d
         g = zeros(2, 2); g[1, 1] = -0.5; g[2, 1] = 1; g[1, 2] = 1
         roots, boxes = YRoots.solve([YRoots.MultiPower(f), YRoots.MultiPower(g)], -1.0, 1.0;
-                                    roundoff=106, returnBoundingBoxes=true)
+                                    numtype=Double64, returnBoundingBoxes=true)
         @test length(roots) == 2
         @test all(eltype(r) == Double64 for r in roots)
         dd, half = big(d), big(1) / 2
