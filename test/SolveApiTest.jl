@@ -591,10 +591,26 @@ function test_warnDuplicateRoots_listsEachSetOnItsOwnLine()
 end
 
 function test_solve_minBoundingIntervalSizeFollowsType()
-    @testset "minBoundingIntervalSize default follows the type" begin
-        @test YRoots.defaultMinBoundingIntervalSize(Float64) == 1e-5
-        @test YRoots.defaultMinBoundingIntervalSize(Double64) == 1e-5
-        @test YRoots.defaultMinBoundingIntervalSize(Float32) ≈ cbrt(eps(Float32))
+    @testset "minBoundingIntervalSize default follows the type and the input" begin
+        for polynomialInput in (true, false)
+            @test YRoots.defaultMinBoundingIntervalSize(Float64, polynomialInput) == 1e-5
+            @test YRoots.defaultMinBoundingIntervalSize(Float32, polynomialInput) ≈ cbrt(eps(Float32))
+        end
+        # Double64 coefficients are exact to Double64, a callable only to the Float64 it is approximated in.
+        @test YRoots.defaultMinBoundingIntervalSize(Double64, true) ≈ Float64(cbrt(eps(Double64)))
+        @test YRoots.defaultMinBoundingIntervalSize(Double64, false) == 1e-5
+        # A system mixing the two is held to its callable.
+        p = YRoots.MultiPower([-0.1 0.0; 1.0 0.0])
+        @test YRoots.allPolynomial([p, p])
+        @test !YRoots.allPolynomial([p, (x, y) -> y - 0.2])
+
+        # A Double64 solve of a callable keeps the Float64 default. Below it, solving the boxes of
+        # this system's poorly conditioned simple roots again approximates the functions afresh on
+        # ever smaller boxes: at 1e-8 it took 12 times as long, and at 1e-10 it ran out of memory.
+        # Chebfun2 case 1.2.
+        f = (x, y) -> (y^2-x^3)*((y-0.7)^2-(x-0.3)^3)*((y+0.2)^2-(x+0.8)^3)*((y+0.2)^2-(x-0.8)^3)
+        g = (x, y) -> ((y+.4)^3-(x-.4)^2)*((y+.3)^3-(x-.3)^2)*((y-.5)^3-(x+.6)^2)*((y+0.3)^3-(2*x-0.8)^3)
+        @test length(YRoots.solve([f, g], -1.0, 1.0; numtype=Double64)) == 13
 
         # Float32 boxes are wider than 1e-5, so the old default solved each again. With the
         # Float32 default the roots are still found, to Float32 accuracy, and nothing is re-solved.

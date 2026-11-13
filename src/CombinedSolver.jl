@@ -96,16 +96,44 @@ function checkSolveType(numtype)
 end
 
 """
-The `minBoundingIntervalSize` a solve in floating-point type `T` uses when none is given.
+    defaultMinBoundingIntervalSize(T, polynomialInput)
 
-`Float64` and `Double64` keep the long-standing `1e-5`. A callable is approximated in `Float64` whatever
-the type, so a `Double64` solve of one cannot tighten its boxes past a `Float64` solve.
+The `minBoundingIntervalSize` a solve in floating-point type `T` uses when none is given, for a
+system whose functions are all polynomials given as coefficients (`polynomialInput`, see
+`allPolynomial`) or that has at least one callable.
 
-`Float32` uses `eps(Float32)^(1/3)`, about `4.9e-3`, the same cube root of machine epsilon that `1e-5` is
-for `Float64`. Its boxes come out `1e-6` to `2e-4` wide, so under `1e-5` nearly every one was solved again,
-which made a Float32 solve up to 8x slower than a Float64 one for accuracy it was never asked for.
+The rule is the cube root of the machine epsilon of the precision the input is known to. Polynomial
+coefficients are exact, so that is `T`'s. A callable is approximated in `Float64` whatever `T`, so for
+a type finer than `Float64` it is `Float64`'s; a system mixing the two is held to its callables.
+
+| `T`        | polynomial input                     | a callable  |
+|:-----------|:-------------------------------------|:------------|
+| `Float32`  | `eps(Float32)^(1/3)`, about `4.9e-3`  | the same    |
+| `Float64`  | `1e-5`                               | `1e-5`      |
+| `Double64` | `eps(Double64)^(1/3)`, about `3.7e-11`| `1e-5`      |
+
+`Float64` keeps the long-standing `1e-5`, close to its `eps^(1/3)` of `6.1e-6`.
+
+Going below the rule does harm rather than good. Every box larger than the value is solved again,
+and a box around a root the precision cannot place more closely only breaks up when solved again:
+on the Chebfun2 systems with poorly conditioned simple roots (1.2, 3.1, 3.2, 4.2, 7.2) and on pairs
+of simple roots under `1e-9` apart, `Float64` polynomial input at `1e-6` to `1e-8` returned
+spurious roots -- 31 for 13 on 1.2. A callable solved again on a tiny box is approximated again
+there, which ran out of memory: in `Float64` at `1e-8` and in `Double64` at `1e-10` and below. In
+`Double64` polynomial input every value from `1e-5` to `1e-14` gave the same roots, its boxes
+coming out far smaller than any of them, so its default follows the rule.
+
+`Float32` uses the rule for a callable too, though its boxes come out about `1e-5` wide and solving
+them again would approximate the callable afresh in `Float64` on each, to near `Float64` accuracy:
+at `1e-5` a well conditioned root came back to `1e-15` rather than `1e-7`, at 10 to 20 times the
+cost, and roots under `1e-6` apart came back with spurious copies. That accuracy is what
+`minBoundingIntervalSize=1e-5` buys a `Float32` solve of a callable, and the default does not
+assume it is wanted.
 """
-defaultMinBoundingIntervalSize(T) = T === Float32 ? eps(Float32)^(1/3) : 1e-5
+defaultMinBoundingIntervalSize(::Type{Float32}, polynomialInput::Bool) = eps(Float32)^(1/3)
+defaultMinBoundingIntervalSize(::Type{Float64}, polynomialInput::Bool) = 1e-5
+defaultMinBoundingIntervalSize(::Type{Double64}, polynomialInput::Bool) =
+    polynomialInput ? Float64(eps(Double64)^(1/3)) : 1e-5
 
 """
     solve(funcs, a, b; verbose=false, returnBoundingBoxes=false, exact=false,
@@ -142,8 +170,12 @@ search recurses until it zeros in on each root. One point -- and optionally a bo
   if the functions cannot be evaluated accurately at points close together. The value is
   absolute while the interval in question lies within `[-1, 1]`, and relative otherwise:
   for an interval with an endpoint of magnitude greater than 1, it is multiplied by that
-  magnitude in that dimension. Defaults to a value for `numtype`: `1e-5` for `Float64` and
-  `Double64`, and `eps(Float32)^(1/3)` (about `4.9e-3`) for `Float32`.
+  magnitude in that dimension. Defaults to a value for `numtype` and the input: `1e-5` for
+  `Float64`, `eps(Float32)^(1/3)` (about `4.9e-3`) for `Float32`, and for `Double64`
+  `eps(Double64)^(1/3)` (about `3.7e-11`) when every function is a polynomial and `1e-5` when
+  any is a callable, which is approximated in `Float64`. See
+  `YRoots.defaultMinBoundingIntervalSize`. A `Float32` solve of a callable given `1e-5` is
+  approximated afresh around each root, to near `Float64` accuracy, at 10 to 20 times the cost.
 - `numtype::Type = Float64`: The number type to solve in: `Float32`, `Float64` or `Double64`
   (106 bits, from DoubleFloats.jl; YRoots exports it). Any other type throws an
   `ArgumentError`. Every type runs the same solver. A callable is always approximated in
@@ -187,7 +219,7 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
     # Every precision runs the same solver, generic over its number type. It solves sub-boxes by
     # calling itself, so the input above is checked once.
     T = checkSolveType(numtype)
-    minBoundingIntervalSize = something(minBoundingIntervalSize, defaultMinBoundingIntervalSize(T))
+    minBoundingIntervalSize = something(minBoundingIntervalSize, defaultMinBoundingIntervalSize(T, allPolynomial(funcs)))
     # The solves it makes add their sets of possible duplicate roots here, so this call warns about all of them once.
     dupSets = Any[]
     result = solveSystem(funcs, a, b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact,
