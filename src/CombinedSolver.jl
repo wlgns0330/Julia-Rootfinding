@@ -34,6 +34,23 @@ function warnDuplicateRoots(dupSets)
 end
 
 """
+Warn that a `Double64` solve of a callable is no more accurate than a `Float64` one, and slower.
+
+A callable is approximated by FFTW's discrete cosine transform, which has no `Double64` method, so
+the approximation is made in `Float64` and only converted to `Double64`. Its error is `Float64`'s, and
+so is that of the roots, while every step after it runs in double-double arithmetic: on the larger
+Chebfun2 systems a `Double64` solve of the callables took 2 to 3 times as long as a `Float64` one. Polynomial
+input given as coefficients ([`MultiPower`](@ref) / [`MultiCheb`](@ref)) is exact, and is where
+`Double64` gains accuracy.
+"""
+function warnDouble64Callable()
+    @warn "numtype=Double64 with a callable: callables are approximated with FFTW, which works in " *
+          "Float64, so the roots are only accurate to Float64 precision, and the solve is slower than " *
+          "with numtype=Float64. Give the functions as MultiPower or MultiCheb coefficients for " *
+          "Double64 accuracy, or use numtype=Float64."
+end
+
+"""
 Check the arguments of [`solve`](@ref) and put the bounds in the form it works with, so bad input fails
 up front with an `ArgumentError` naming the problem instead of deep inside the solver, or not at all.
 
@@ -219,7 +236,9 @@ function solve(funcs,a,b; verbose = false, returnBoundingBoxes = false, exact=fa
     # Every precision runs the same solver, generic over its number type. It solves sub-boxes by
     # calling itself, so the input above is checked once.
     T = checkSolveType(numtype)
-    minBoundingIntervalSize = something(minBoundingIntervalSize, defaultMinBoundingIntervalSize(T, allPolynomial(funcs)))
+    polynomialInput = allPolynomial(funcs)
+    T === Double64 && !polynomialInput && warnDouble64Callable()
+    minBoundingIntervalSize = something(minBoundingIntervalSize, defaultMinBoundingIntervalSize(T, polynomialInput))
     # The solves it makes add their sets of possible duplicate roots here, so this call warns about all of them once.
     dupSets = Any[]
     result = solveSystem(funcs, a, b; verbose=verbose, returnBoundingBoxes=returnBoundingBoxes, exact=exact,

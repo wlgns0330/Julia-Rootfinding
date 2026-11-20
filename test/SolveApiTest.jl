@@ -63,6 +63,7 @@ function test_all_SolveApi()
         test_solve_minBoundingIntervalSizeFollowsType()
         test_solve_float32SingularLinearPartSolvesDirectly()
         test_solve_numtypeSelectsTheType()
+        test_solve_double64CallableWarns()
     end
 end
 
@@ -666,5 +667,22 @@ function test_solve_numtypeSelectsTheType()
         expected = [[half / 2, half / 2], [(half + dd) / 2, (half - dd) / 2]]
         @test all(minimum(maximum(abs.(big.(r) .- e)) for r in roots) < 1e-20 for e in expected)
         @test all(any(all(big.(box[1, :]) .<= e .<= big.(box[2, :])) for box in boxes) for e in expected)
+    end
+end
+
+function test_solve_double64CallableWarns()
+    @testset "a Double64 solve of a callable warns that it is only Float64 accurate" begin
+        warning = "numtype=Double64 with a callable"
+        line = (x, y) -> x - 0.5
+        p = YRoots.MultiPower([-0.5 0.0; 1.0 0.0])        # x - 0.5
+        q = YRoots.MultiPower([0.25 1.0; 0.0 0.0])        # y + 0.25
+        warned(funcs, T) = any(occursin(warning, m) for m in solveRecordingWarnings(funcs, -1.0, 1.0; numtype=T)[2])
+        # Any callable in a Double64 solve warns, alone or beside a polynomial.
+        @test warned([line, (x, y) -> y + 0.25], Double64)
+        @test warned([p, (x, y) -> y + 0.25], Double64)
+        # Polynomial input gains Double64 accuracy, and other types make no such promise.
+        @test !warned([p, q], Double64)
+        @test !warned([line, (x, y) -> y + 0.25], Float64)
+        @test !warned([line, (x, y) -> y + 0.25], Float32)
     end
 end
